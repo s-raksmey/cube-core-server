@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantType {
+  MAIN
+  SUB
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  SUPERADMIN
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+model Tenant {
+  id             String       @id @default(uuid())
+  type           TenantType
+  parentTenantId String?
+  parentTenant   Tenant?      @relation("TenantHierarchy", fields: [parentTenantId], references: [id])
+  childTenants   Tenant[]     @relation("TenantHierarchy")
+  name           String
+  slug           String       @unique
+  status         TenantStatus @default(ACTIVE)
+  settings       Json         @default("{}")
+  users          User[]
+  auditLogsAsActor  AuditLog[] @relation("AuditActorTenant")
+  auditLogsAsTarget AuditLog[] @relation("AuditTargetTenant")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([parentTenantId])
+  @@index([type, status])
+}
+
+model User {
+  id           String     @id @default(uuid())
+  tenantId     String
+  tenant       Tenant     @relation(fields: [tenantId], references: [id])
+  email        String     @unique
+  passwordHash String
+  role         UserRole
+  status       UserStatus @default(ACTIVE)
+  auditLogs    AuditLog[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([tenantId])
+  @@index([role, status])
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  actorUserId    String?
+  actorUser      User?    @relation(fields: [actorUserId], references: [id])
+  actorTenantId  String?
+  actorTenant    Tenant?  @relation("AuditActorTenant", fields: [actorTenantId], references: [id])
+  targetTenantId String?
+  targetTenant   Tenant?  @relation("AuditTargetTenant", fields: [targetTenantId], references: [id])
+  action         String
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  @@index([actorUserId])
+  @@index([actorTenantId])
+  @@index([targetTenantId])
+  @@index([createdAt])
+}

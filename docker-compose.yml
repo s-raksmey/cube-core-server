@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16
+    container_name: cube-core-db
+    restart: unless-stopped
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: cube
+      POSTGRES_PASSWORD: cube
+      POSTGRES_DB: cube_core
+    volumes:
+      - cube_core_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cube -d cube_core"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  cube_core_pg_data:
