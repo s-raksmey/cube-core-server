@@ -65,62 +65,49 @@ Dev script ports (set when configuring scripts):
 next dev --port 4000
 ```
 
-## 3. Install `cube-core-admin` packages
+## 3. `cube-core-admin` (main tenant console)
 
-From `C:\personal\cube-core-admin`:
+Already installed: Apollo Client, Zod, **shadcn/ui** (Nova / Radix).
 
 ```bash
-npm install @apollo/client graphql zod
+# add more UI pieces as needed
+npx shadcn@latest add dialog dropdown-menu table
 ```
 
-Create `.env.local`:
+`.env.local`:
+
+```env
+NEXT_PUBLIC_GRAPHQL_URL="http://localhost:4000/api/graphql"
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
+```
+
+Dev: `npm run dev` → port **3000**
+
+## 4. `cube-core-tenant` (sub-tenant app)
+
+Already installed: Apollo Client, Zod, **shadcn/ui** (same preset as admin).
+
+`.env.local`:
 
 ```env
 NEXT_PUBLIC_GRAPHQL_URL="http://localhost:4000/api/graphql"
 NEXT_PUBLIC_APP_URL="http://localhost:3001"
 ```
 
-Dev:
+Dev: `npm run dev` → port **3001**
 
-```bash
-next dev --port 3001
-```
+## 5. `cube-core-website` (public site)
 
-## 4. Install `cube-core-tenant` packages (when starting tenant app)
+Already installed: **shadcn/ui** (same preset). No GraphQL in v1.
 
-From `C:\personal\cube-core-tenant`:
-
-```bash
-npm install @apollo/client graphql zod
-```
-
-Create `.env.local`:
+`.env.local`:
 
 ```env
-NEXT_PUBLIC_GRAPHQL_URL="http://localhost:4000/api/graphql"
-NEXT_PUBLIC_APP_URL="http://localhost:3002"
+NEXT_PUBLIC_ADMIN_LOGIN_URL="http://localhost:3000/login"
+NEXT_PUBLIC_TENANT_LOGIN_URL="http://localhost:3001/login"
 ```
 
-Dev:
-
-```bash
-next dev --port 3002
-```
-
-## 5. `cube-core-website` (no extra packages in v1)
-
-Create `.env.local` later:
-
-```env
-NEXT_PUBLIC_ADMIN_LOGIN_URL="http://localhost:3001/login"
-NEXT_PUBLIC_TENANT_LOGIN_URL="http://localhost:3002/login"
-```
-
-Dev:
-
-```bash
-next dev --port 3000
-```
+Dev: `npm run dev` → port **3002**
 
 ## 6. Daily commands
 
@@ -129,13 +116,13 @@ next dev --port 3000
 npm run db:up
 npm run dev
 
-# from cube-core-admin
+# from cube-core-admin   → :3000
 npm run dev
 
-# from cube-core-tenant
+# from cube-core-tenant  → :3001
 npm run dev
 
-# from cube-core-website
+# from cube-core-website → :3002
 npm run dev
 ```
 

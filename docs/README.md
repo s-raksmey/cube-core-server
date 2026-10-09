@@ -11,6 +11,7 @@ This folder defines the product vision, multi-tenant model, features, and softwa
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, repo responsibilities, data flow |
 | [TECH-STACK.md](./TECH-STACK.md) | Locked library/framework decisions |
 | [SETUP.md](./SETUP.md) | Exact install + env + port setup |
+| [BRANDING.md](./BRANDING.md) | Cube Core color tokens and UI rules |
 | [ROADMAP.md](./ROADMAP.md) | Suggested build phases |
 
 ## Workspace apps
@@ -25,3 +26,13 @@ This folder defines the product vision, multi-tenant model, features, and softwa
 ## Status
 
 These repos are currently Next.js scaffolds. Treat this `docs/` folder as the source of truth until implementation catches up.
+
+## AI implementation rule
+
+Project Cursor rules (`.cursor/rules/cube-core-implementation.mdc`) require that when you ask the AI to build/do something for you, it must:
+
+1. Implement the feature in the correct app(s)
+2. Follow `docs/` architecture, stack, and roles
+3. Update these docs when behavior changes
+
+Say `follow our rule` only when you want teaching mode instead of full implementation.

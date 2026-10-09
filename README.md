@@ -9,7 +9,7 @@ This service is the **system of record** for authentication, tenancy, users, set
 - **SuperAdmin** manages the singleton main tenant (`core-super-admin`) and all **sub-tenants** remotely
 - **Admin** manages **one sub-tenant only**
 - **SuperAdmin cannot log in to a sub-tenant**
-- Console has exactly **two roles** in v1
+- Console roles: **SuperAdmin** (main), **Admin** + **Editor** (sub-tenant)
 
 ## Documentation
 
@@ -33,9 +33,9 @@ Start here:
 
 ## Tech stack (locked)
 
-- Next.js + TypeScript + Tailwind (frontends)
+- Next.js + TypeScript + Tailwind + **shadcn/ui** (admin / tenant / website)
 - GraphQL Yoga + SDL (this server)
-- Prisma + PostgreSQL 16
+- Prisma + PostgreSQL
 - Zod, bcryptjs, jose
 - Apollo Client (admin / tenant)
 

@@ -76,7 +76,7 @@ src/
 - Calls GraphQL for all privileged operations
 - Shows navigation based on role
 - Never stores secrets beyond session cookies / tokens needed for auth
-- Tailwind for layout/components
+- Tailwind + **shadcn/ui** for layout/components
 
 Suggested areas:
 

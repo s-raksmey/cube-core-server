@@ -1,0 +1,117 @@
+enum UserRole {
+  SUPERADMIN
+  ADMIN
+  EDITOR
+}
+
+enum TenantType {
+  MAIN
+  SUB
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+type Tenant {
+  id: ID!
+  name: String!
+  slug: String!
+  type: TenantType!
+  status: TenantStatus!
+  createdAt: String!
+}
+
+type User {
+  id: ID!
+  email: String!
+  role: UserRole!
+  status: UserStatus
+  tenantId: ID!
+  tenant: Tenant!
+  createdAt: String
+}
+
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
+type MonthCount {
+  month: String!
+  count: Int!
+}
+
+type StatusCount {
+  status: String!
+  count: Int!
+}
+
+type ActivityItem {
+  id: ID!
+  action: String!
+  createdAt: String!
+  actorEmail: String
+  targetTenantName: String
+  targetTenantSlug: String
+}
+
+type PlatformDashboard {
+  totalSubTenants: Int!
+  activeSubTenants: Int!
+  totalAdmins: Int!
+  platformHealth: String!
+  growthByMonth: [MonthCount!]!
+  statusDistribution: [StatusCount!]!
+  recentSubTenants: [Tenant!]!
+  recentActivity: [ActivityItem!]!
+}
+
+type TenantDashboard {
+  tenant: Tenant!
+  totalUsers: Int!
+  activeUsers: Int!
+  publishedContent: Int!
+  mediaStorageBytes: Int!
+  contentActivityByMonth: [MonthCount!]!
+  contentByStatus: [StatusCount!]!
+  recentUsers: [User!]!
+  recentActivity: [ActivityItem!]!
+}
+
+type SubTenantPage {
+  items: [Tenant!]!
+  total: Int!
+  page: Int!
+  pageSize: Int!
+}
+
+type Query {
+  me: User
+  platformDashboard: PlatformDashboard!
+  tenantDashboard: TenantDashboard!
+  subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
+}
+
+enum LoginAudience {
+  ADMIN_CONSOLE
+  TENANT_APP
+}
+
+type Mutation {
+  login(
+    email: String!
+    password: String!
+    audience: LoginAudience = ADMIN_CONSOLE
+  ): AuthPayload!
+  logout: Boolean!
+  createSubTenant(name: String!, slug: String!): Tenant!
+  setSubTenantStatus(tenantId: ID!, status: TenantStatus!): Tenant!
+  createAdminUser(email: String!, password: String!, tenantId: ID!): User!
+}

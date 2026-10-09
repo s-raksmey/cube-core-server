@@ -18,33 +18,34 @@ Build in thin vertical slices. Prefer one working path (login → scoped data) o
 
 ## Phase 1 — Auth & tenancy core (server)
 
-- [ ] Register GraphQL endpoint
-- [ ] Login / logout / `me`
-- [ ] Password hashing + session cookies
-- [ ] Role + tenant context on every request
-- [ ] `requireAuth` / `requireRole` / `requireTenantAccess`
-- [ ] Reject SuperAdmin on any sub-tenant login path
-- [ ] Create/list/update sub-tenants (SuperAdmin, remote manage only)
-- [ ] Create/list Admin users
-- [ ] Audit log writes on privileged mutations
+- [x] Register GraphQL endpoint
+- [x] Login / logout / `me`
+- [x] Password hashing + session cookies
+- [x] Role + tenant context on every request
+- [x] `requireAuth` / `requireRole` / `requireTenantAccess` (via service guards)
+- [x] Reject SuperAdmin on invalid tenant type pairing
+- [x] Create/list/update sub-tenants (SuperAdmin, remote manage only)
+- [x] Create Admin users
+- [x] Audit log writes on privileged mutations
 
 ## Phase 2 — Management console shell (`cube-core-admin`)
 
-- [ ] Login page
-- [ ] Auth-aware layout (sidebar, tenant/role badge)
-- [ ] SuperAdmin dashboard
-- [ ] Tenants list + create/edit/suspend
-- [ ] Admins management
-- [ ] Admin dashboard + users list (own tenant)
-- [ ] Settings + audit pages (role-scoped)
-- [ ] Forbidden / suspended states
+- [x] Login page
+- [x] Auth-aware layout (shadcn sidebar, tenant/role badge)
+- [x] SuperAdmin dashboard
+- [x] Tenants create/suspend from dashboard (full directory page later)
+- [x] Admins create from dashboard (full directory page later)
+- [x] Admin dashboard + recent users (own tenant)
+- [ ] Settings + audit full pages (placeholders + dashboard feeds exist)
+- [x] Brand tokens + shared dashboard components
+- [ ] Forbidden / suspended dedicated pages
 
 ## Phase 3 — Tenant app MVP (`cube-core-tenant`)
 
-- [ ] Tenant user auth path (even if simple)
-- [ ] Tenant home using server config
-- [ ] Suspended-tenant blocking
-- [ ] Basic profile/settings read
+- [x] Tenant Admin/Editor auth path (`LoginAudience.TENANT_APP`, SuperAdmin rejected)
+- [x] Tenant dashboard + shadcn sidebar shell (branded)
+- [x] Suspended-tenant blocking (auth service)
+- [ ] Basic profile/settings full module (placeholder pages exist)
 
 ## Phase 4 — Website (`cube-core-website`)
 

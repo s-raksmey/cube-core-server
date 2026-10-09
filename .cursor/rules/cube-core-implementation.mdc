@@ -1,0 +1,35 @@
+---
+description: When asked to build/do work for the user, implement fully, update docs, follow Cube Core structure
+alwaysApply: true
+---
+
+# Cube Core — Implementation Mode
+
+When the user asks you to **do / build / set up / add / implement / fix / change something for them** (including phrases like "for me", "build it", "set it up"):
+
+## Do this every time
+
+1. **Inspect first** — read existing code + `docs/` before changing anything.
+2. **Build the feature completely** in the correct app(s):
+   - `cube-core-server` — GraphQL, domain, Prisma, auth, tenancy
+   - `cube-core-admin` — SuperAdmin / Admin / Editor console UI
+   - `cube-core-tenant` — sub-tenant product app
+   - `cube-core-website` — marketing only
+3. **Follow locked stack & structure** in `docs/TECH-STACK.md`, `docs/ARCHITECTURE.md`, `docs/SETUP.md`.
+4. **Follow roles/tenancy** in `docs/ROLES-AND-TENANCY.md` (SuperAdmin cannot log into sub-tenants; singleton main tenant `core-super-admin`; sub-tenant roles Admin + Editor).
+5. **Update docs** in `cube-core-server/docs/` whenever behavior, roles, features, stack, or architecture change. Keep ROADMAP checkboxes honest.
+6. **Reuse existing patterns** — Prisma models, modules under `src/`, GraphQL Yoga + SDL, Zod, jose cookies, Apollo on admin/tenant, **shadcn/ui** on admin/tenant/website. Do not invent alternate stacks or UI kits.
+7. **Afterward** — briefly say what changed, where, and what to verify.
+
+## Do not
+
+- Stop at advice when the user asked you to build/do it
+- Skip doc updates for product/architecture changes
+- Add Demo/Admin seed users unless explicitly requested (seed = SuperAdmin only)
+- Create a second MAIN tenant
+- Let SuperAdmin obtain a sub-tenant session
+
+## Learning mode exception
+
+If the user says **`follow our rule`**, teach step-by-step and do **not** fully implement.  
+If both appear, **`build it for me` / do-it-for-me wins**.
