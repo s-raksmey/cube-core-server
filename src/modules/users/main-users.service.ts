@@ -365,36 +365,24 @@ export async function deleteMainTenantUser(
       targetStatus: current.status,
       activeSuperAdminCount: await countActiveSuperAdmins(tx),
     });
-    const now = new Date();
-    await tx.user.update({
-      where: { uuid: existing.uuid },
+    await tx.auditLog.create({
       data: {
-        status: UserStatus.INACTIVE,
-        deletedAt: now,
-        sessionsRevokedAt: now,
+        actorUserUuid: session.userId,
+        tenantUuid: session.tenantId,
+        action: "MAIN_USER_DELETED",
+        targetType: "user",
+        targetUuid: existing.uuid,
+        metadata: {
+          email: existing.email,
+          fullName: displayFullName(existing),
+          actorUserUuid: session.userId,
+        },
       },
     });
-    await tx.userSession.updateMany({
-      where: { userUuid: existing.uuid, revokedAt: null },
-      data: { revokedAt: now },
-    });
-    await tx.userActivationToken.updateMany({
-      where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
-      data: { revokedAt: now, encryptedToken: null },
-    });
-    await tx.userPasswordResetToken.updateMany({
-      where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
-      data: { revokedAt: now },
-    });
-  });
 
-  await writeAuthAudit({
-    action: "MAIN_USER_DELETED",
-    actorUserUuid: session.userId,
-    tenantUuid: session.tenantId,
-    targetType: "user",
-    targetUuid: existing.uuid,
-    metadata: { email: existing.email, fullName: displayFullName(existing) },
+    // Cascades remove the user's memberships, sessions, and authentication credentials.
+    // Creator references on audit records and tokens are set null by their foreign keys.
+    await tx.user.delete({ where: { uuid: existing.uuid } });
   });
 
   return true;
@@ -413,6 +401,9 @@ export async function generateMainTenantUserActivationLink(
   ) {
     throw validationError("User not found");
   }
+  if (existing.uuid === session.userId) {
+    throw validationError("You cannot reactivate your own account");
+  }
   const activation = await prisma.$transaction(async (tx) => {
     const current = await tx.user.findUnique({
       where: { uuid: existing.uuid },
@@ -420,12 +411,13 @@ export async function generateMainTenantUserActivationLink(
     });
     if (
       !current ||
-      current.activatedAt ||
-      current.twoFactorAuth?.enabledAt ||
+      current.deletedAt ||
       (current.status !== UserStatus.PENDING &&
-        current.status !== UserStatus.LOCKED)
+        current.status !== UserStatus.ACTIVE &&
+        current.status !== UserStatus.LOCKED &&
+        current.status !== UserStatus.INACTIVE)
     ) {
-      throw validationError("This account has already been activated; use password reset instead");
+      throw validationError("This account cannot be reactivated");
     }
 
     const now = new Date();
@@ -454,12 +446,15 @@ export async function generateMainTenantUserActivationLink(
     await tx.authLoginChallenge.updateMany({
       where: {
         userUuid: current.uuid,
-        type: "TOTP_ENROLL",
         consumedAt: null,
       },
       data: { consumedAt: now },
     });
     await tx.userRecoveryCode.deleteMany({ where: { userUuid: current.uuid } });
+    await tx.userPasswordResetToken.updateMany({
+      where: { userUuid: current.uuid, usedAt: null, revokedAt: null },
+      data: { revokedAt: now },
+    });
     await tx.userSession.updateMany({
       where: { userUuid: current.uuid, revokedAt: null },
       data: { revokedAt: now },
@@ -471,11 +466,15 @@ export async function generateMainTenantUserActivationLink(
   });
 
   await writeAuthAudit({
-    action: "auth.activation.link_generated",
+    action:
+      existing.status === UserStatus.PENDING
+        ? "auth.activation.restarted"
+        : "auth.account.reactivated",
     actorUserUuid: session.userId,
     tenantUuid: session.tenantId,
     targetType: "user",
     targetUuid: existing.uuid,
+    metadata: { previousStatus: existing.status },
   });
 
   return {

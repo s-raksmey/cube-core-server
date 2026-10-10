@@ -39,6 +39,8 @@ The admin uses typed, generated GraphQL documents from a Server Action for authe
 4. Recovery codes shown once; token consumed; status → `ACTIVE`.
 5. Redirect to `/login` (no session issued during activation).
 
+If an active user loses access to their authenticator, a different SuperAdmin can use **Reactivate** in Main Tenant User Management. This revokes sessions and open challenges, clears the existing credentials and 2FA/recovery setup, returns the account to `PENDING`, and issues a new activation link. The user chooses credentials again and enrolls a new authenticator. A SuperAdmin cannot reactivate their own account.
+
 Main Console activations use `ADMIN_APP_URL`. Sub-tenant invitations use `TENANT_APP_URL`.
 
 ## Password reset
