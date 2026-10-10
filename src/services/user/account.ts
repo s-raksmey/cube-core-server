@@ -180,10 +180,9 @@ export function assertConsoleAuthorization(
     }
     if (
       account.roleCode !== "ADMIN" &&
-      account.roleCode !== "EDITOR" &&
-      account.roleCode !== "AUTHOR"
+      account.roleCode !== "EDITOR"
     ) {
-      throw forbidden("Only Admin, Editor, or Author can access the sub-tenant console");
+      throw forbidden("Only Admin or Editor can access the sub-tenant console");
     }
     if (account.tenant.type !== TenantType.SUB) {
       throw forbidden("Sub-tenant console login requires a sub-tenant account");
@@ -203,7 +202,7 @@ export function requireActiveAccount(account: LoadedAccount | null) {
   return account;
 }
 
-export async function getRoleUuid(code: "SUPERADMIN" | "ADMIN" | "EDITOR" | "AUTHOR") {
+export async function getRoleUuid(code: "SUPERADMIN" | "ADMIN" | "EDITOR") {
   const role = await prisma.role.findUnique({ where: { code } });
   if (!role) throw validationError(`Missing role seed: ${code}`);
   return role.uuid;

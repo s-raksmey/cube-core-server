@@ -34,7 +34,7 @@ const createTenantUserSchema = z.object({
   email: z.string().trim().email().max(254),
   firstName: namePart,
   lastName: namePart,
-  role: z.enum(["ADMIN", "EDITOR", "AUTHOR"]).default("ADMIN"),
+  role: z.enum(["ADMIN", "EDITOR"]).default("ADMIN"),
   tenantId: z.string().uuid().optional(),
 });
 
@@ -153,7 +153,7 @@ export async function createAdminUser(
     email: string;
     firstName: string;
     lastName: string;
-    role?: "ADMIN" | "EDITOR" | "AUTHOR";
+    role?: "ADMIN" | "EDITOR";
     tenantId?: string;
   },
 ) {
@@ -222,12 +222,7 @@ export async function createAdminUser(
   });
 
   await writeAuthAudit({
-    action:
-      roleCode === "EDITOR"
-        ? "EDITOR_CREATED"
-        : roleCode === "AUTHOR"
-          ? "AUTHOR_CREATED"
-          : "ADMIN_CREATED",
+    action: roleCode === "EDITOR" ? "EDITOR_CREATED" : "ADMIN_CREATED",
     actorUserUuid: session.userId,
     tenantUuid: session.tenantId,
     targetType: "user",
@@ -312,7 +307,7 @@ export async function listTenantUsers(
 
   const where: Prisma.TenantMembershipWhereInput = {
     tenantUuid: session.tenantId,
-    role: { code: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
+    role: { code: { in: ["ADMIN", "EDITOR"] } },
     user: {
       deletedAt: null,
       ...(search

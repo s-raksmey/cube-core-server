@@ -141,7 +141,7 @@ User opens `/` (landing) → Get Started navigates to `/login`
   → returns scoped data
 ```
 
-Identity is unified (`users` + `roles` + `tenant_memberships`). Main Console SuperAdmin accounts are provisioned via User Management (`createMainTenantUser`) with an activation link — never self-registered. Sub-tenant Admin/Editor/Author invites use `createAdminUser` (activation, not plaintext password). Audience `ADMIN_CONSOLE` allows MAIN / SuperAdmin only. Audience `TENANT_APP` allows SUB / Admin|Editor|Author only. Login accepts username or email.
+Identity is unified (`users` + `roles` + `tenant_memberships`). Main Console SuperAdmin accounts are provisioned via User Management (`createMainTenantUser`) with an activation link — never self-registered. Sub-tenant Admin/Editor invites use `createAdminUser` (activation, not plaintext password). Audience `ADMIN_CONSOLE` allows MAIN / SuperAdmin only. Audience `TENANT_APP` allows SUB / Admin|Editor only. Login accepts username or email.
 
 ### Main Tenant user management
 
@@ -262,4 +262,4 @@ Revisit schema-per-tenant or DB-per-tenant only if compliance/contracts require 
 - Separate auth microservice
 - Event-driven choreography between many services
 - Duplicate business rules in each frontend
-- Building full RBAC matrix before SUPERADMIN + ADMIN/EDITOR/AUTHOR isolation is working end-to-end
+- Building full RBAC matrix before SUPERADMIN + ADMIN/EDITOR isolation is working end-to-end

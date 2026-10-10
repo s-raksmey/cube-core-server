@@ -11,7 +11,7 @@ export const tenantsCreateAdminUserResolver = {
         firstName: string;
         lastName: string;
         tenantId?: string | null;
-        role?: "ADMIN" | "EDITOR" | "AUTHOR";
+        role?: "ADMIN" | "EDITOR";
       },
       ctx: GraphQLContext,
     ) => {

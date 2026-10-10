@@ -12,7 +12,7 @@ enum UserStatus {
   PENDING
   ACTIVE
   LOCKED
-  DISABLED
+  INACTIVE
 }
 
 enum UserType {
@@ -23,7 +23,6 @@ enum UserType {
 enum SubTenantRole {
   ADMIN
   EDITOR
-  AUTHOR
 }
 
 enum LoginAudience {
@@ -92,6 +91,11 @@ type ActivationLinkPayload {
   activationUrl: String!
   expiresAt: String!
   user: User!
+}
+
+type ExistingActivationLinkPayload {
+  activationUrl: String!
+  expiresAt: String!
 }
 
 input UpdateMainTenantUserInput {
@@ -199,6 +203,7 @@ type ActivationCompletePayload {
 type PasswordResetValidatePayload {
   valid: Boolean!
   expiresAt: String!
+  username: String!
 }
 
 type PasswordResetCompletePayload {
@@ -213,6 +218,7 @@ type RefreshSessionPayload {
 }
 
 type Query {
+  mainTenantUserActivationLink(userId: ID!): ExistingActivationLinkPayload
   me: User
   platformDashboard: PlatformDashboard!
   tenantDashboard: TenantDashboard!
@@ -249,9 +255,6 @@ type Mutation {
   ): ActivationCompletePayload!
   completePasswordReset(
     token: String!
-    firstName: String
-    lastName: String
-    fullName: String
     password: String!
     confirmPassword: String!
   ): PasswordResetCompletePayload!
@@ -268,6 +271,7 @@ type Mutation {
     tenantId: ID
     role: SubTenantRole = ADMIN
   ): CreateTenantUserPayload!
+  deleteTenantUser(id: ID!): Boolean!
   createMainTenantUser(
     firstName: String!
     lastName: String!

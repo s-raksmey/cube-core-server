@@ -11,15 +11,7 @@ import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden, unauthenticated, validationError } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import { revokeAllUserSessions } from "@/src/modules/auth/session.service";
-import {
-  displayFullName,
-  findAccountByUuid,
-  mapAuthUser,
-} from "@/src/modules/users/account";
-
-function normalizeName(name: string) {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
-}
+import { findAccountByUuid, mapAuthUser } from "@/src/modules/users/account";
 
 export function assertNotSelfPasswordReset(
   actorUserId: string,
@@ -49,8 +41,11 @@ export async function generateMainTenantUserPasswordResetLink(
   ) {
     throw validationError("User not found");
   }
-  if (target.status !== UserStatus.ACTIVE) {
-    throw validationError("Cannot reset password for a non-active user");
+  if (
+    target.status !== UserStatus.ACTIVE &&
+    target.status !== UserStatus.LOCKED
+  ) {
+    throw validationError("Cannot reset password for an inactive user");
   }
 
   const rawToken = randomToken(32);
@@ -162,14 +157,24 @@ export async function validatePasswordResetToken(token: string) {
   if (!row || row.usedAt || row.revokedAt || row.expiresAt < new Date()) {
     throw unauthenticated("Invalid or expired reset link");
   }
-  return { valid: true as const, expiresAt: row.expiresAt.toISOString() };
+  const account = await findAccountByUuid(row.userUuid);
+  if (
+    !account ||
+    (account.status !== UserStatus.ACTIVE &&
+      account.status !== UserStatus.LOCKED) ||
+    !account.username
+  ) {
+    throw unauthenticated("Invalid or expired reset link");
+  }
+  return {
+    valid: true as const,
+    expiresAt: row.expiresAt.toISOString(),
+    username: account.username,
+  };
 }
 
 export async function completePasswordReset(input: {
   token: string;
-  firstName?: string;
-  lastName?: string;
-  fullName?: string;
   password: string;
   confirmPassword: string;
   correlationId?: string;
@@ -191,16 +196,12 @@ export async function completePasswordReset(input: {
   }
 
   const account = await findAccountByUuid(row.userUuid);
-  if (!account || account.status !== UserStatus.ACTIVE) {
+  if (
+    !account ||
+    (account.status !== UserStatus.ACTIVE &&
+      account.status !== UserStatus.LOCKED)
+  ) {
     throw unauthenticated("Invalid or expired reset link");
-  }
-
-  const providedName =
-    input.firstName != null || input.lastName != null
-      ? `${input.firstName ?? ""} ${input.lastName ?? ""}`.trim()
-      : (input.fullName ?? "");
-  if (!providedName || normalizeName(providedName) !== normalizeName(account.fullName)) {
-    throw validationError("Name does not match this account");
   }
 
   const passwordHash = await hashPassword(input.password);
@@ -214,9 +215,44 @@ export async function completePasswordReset(input: {
       throw unauthenticated("Reset link already used");
     }
 
-    await tx.user.update({
-      where: { uuid: row.userUuid },
-      data: { passwordHash },
+    const updated = await tx.user.updateMany({
+      where: {
+        uuid: row.userUuid,
+        status: { in: [UserStatus.ACTIVE, UserStatus.LOCKED] },
+        ...(account.status === UserStatus.LOCKED && account.lockedUntil
+          ? { lockedUntil: account.lockedUntil }
+          : {}),
+      },
+      data: {
+        passwordHash,
+        failedPasswordAttempts: 0,
+        failedTotpAttempts: 0,
+        ...(account.status === UserStatus.LOCKED && account.lockedUntil
+          ? {
+              status: UserStatus.ACTIVE,
+              lockedUntil: null,
+            }
+          : {}),
+      },
+    });
+    if (updated.count !== 1) {
+      throw unauthenticated("Invalid or expired reset link");
+    }
+
+    await tx.userTwoFactorAuth.updateMany({
+      where: { userUuid: row.userUuid },
+      data: {
+        encryptedSecret: null,
+        pendingEncryptedSecret: null,
+        pendingExpiresAt: null,
+        enabledAt: null,
+      },
+    });
+    await tx.userRecoveryCode.deleteMany({ where: { userUuid: row.userUuid } });
+    await tx.authTotpReplayGuard.deleteMany({ where: { userUuid: row.userUuid } });
+    await tx.authLoginChallenge.updateMany({
+      where: { userUuid: row.userUuid, consumedAt: null },
+      data: { consumedAt: new Date() },
     });
 
     await tx.userPasswordResetToken.updateMany({
@@ -237,7 +273,7 @@ export async function completePasswordReset(input: {
     actorUserUuid: row.userUuid,
     tenantUuid: account.tenantUuid,
     correlationId: input.correlationId,
-    metadata: { userUuid: row.userUuid },
+    metadata: { userUuid: row.userUuid, twoFactorReset: true },
   });
 
   return { success: true as const };

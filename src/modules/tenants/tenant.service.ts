@@ -34,7 +34,7 @@ const createTenantUserSchema = z.object({
   email: z.string().trim().email().max(254),
   firstName: namePart,
   lastName: namePart,
-  role: z.enum(["ADMIN", "EDITOR", "AUTHOR"]).default("ADMIN"),
+  role: z.enum(["ADMIN", "EDITOR"]).default("ADMIN"),
   tenantId: z.string().uuid().optional(),
 });
 
@@ -153,7 +153,7 @@ export async function createAdminUser(
     email: string;
     firstName: string;
     lastName: string;
-    role?: "ADMIN" | "EDITOR" | "AUTHOR";
+    role?: "ADMIN" | "EDITOR";
     tenantId?: string;
   },
 ) {
@@ -222,12 +222,7 @@ export async function createAdminUser(
   });
 
   await writeAuthAudit({
-    action:
-      roleCode === "EDITOR"
-        ? "EDITOR_CREATED"
-        : roleCode === "AUTHOR"
-          ? "AUTHOR_CREATED"
-          : "ADMIN_CREATED",
+    action: roleCode === "EDITOR" ? "EDITOR_CREATED" : "ADMIN_CREATED",
     actorUserUuid: session.userId,
     tenantUuid: session.tenantId,
     targetType: "user",
@@ -312,7 +307,8 @@ export async function listTenantUsers(
 
   const where: Prisma.TenantMembershipWhereInput = {
     tenantUuid: session.tenantId,
-    role: { code: { in: ["ADMIN", "EDITOR", "AUTHOR"] } },
+    status: MembershipStatus.ACTIVE,
+    role: { code: { in: ["ADMIN", "EDITOR"] } },
     user: {
       deletedAt: null,
       ...(search
@@ -365,4 +361,139 @@ export async function listTenantUsers(
     page,
     pageSize,
   };
+}
+
+/** Remove a user's access from the current sub-tenant without hard-deleting identity data. */
+export async function deleteTenantUser(
+  session: SessionPayload,
+  userId: string,
+) {
+  if (session.role !== "ADMIN") {
+    throw forbidden("Only tenant Admins can remove users");
+  }
+
+  const membership = await prisma.tenantMembership.findFirst({
+    where: {
+      tenantUuid: session.tenantId,
+      userUuid: userId,
+      status: MembershipStatus.ACTIVE,
+      role: { code: { in: ["ADMIN", "EDITOR"] } },
+      tenant: { type: TenantType.SUB },
+      user: { deletedAt: null },
+    },
+    include: { user: true, role: true },
+  });
+  if (!membership) throw validationError("User not found");
+  if (membership.userUuid === session.userId) {
+    throw validationError("You cannot remove your own access");
+  }
+
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    // Serialize Admin removals for this tenant to protect the last-Admin rule
+    // from concurrent requests.
+    // Return a scalar row from the CTE; Prisma cannot deserialize the lock
+    // function's PostgreSQL `void` result directly.
+    await tx.$queryRaw`WITH tenant_roster_lock AS MATERIALIZED (
+      SELECT pg_advisory_xact_lock(hashtext(${session.tenantId}), 2)
+    )
+    SELECT 1 AS locked FROM tenant_roster_lock`;
+
+    const current = await tx.tenantMembership.findFirst({
+      where: {
+        uuid: membership.uuid,
+        tenantUuid: session.tenantId,
+        status: MembershipStatus.ACTIVE,
+        role: { code: { in: ["ADMIN", "EDITOR"] } },
+        tenant: { type: TenantType.SUB },
+        user: { deletedAt: null },
+      },
+      include: { user: true, role: true },
+    });
+    if (!current) throw validationError("User not found");
+
+    if (
+      current.role.code === "ADMIN" &&
+      current.user.status === UserStatus.ACTIVE
+    ) {
+      const activeAdminCount = await tx.tenantMembership.count({
+        where: {
+          tenantUuid: session.tenantId,
+          status: MembershipStatus.ACTIVE,
+          role: { code: "ADMIN" },
+          user: { status: UserStatus.ACTIVE, deletedAt: null },
+        },
+      });
+      if (activeAdminCount <= 1) {
+        throw validationError("Cannot remove the last active tenant Admin");
+      }
+    }
+
+    await tx.tenantMembership.update({
+      where: { uuid: current.uuid },
+      data: { status: MembershipStatus.DISABLED },
+    });
+    await tx.userSession.updateMany({
+      where: {
+        userUuid: current.userUuid,
+        tenantUuid: session.tenantId,
+        revokedAt: null,
+      },
+      data: { revokedAt: now },
+    });
+
+    const hasOtherActiveMembership =
+      (await tx.tenantMembership.count({
+        where: {
+          userUuid: current.userUuid,
+          status: MembershipStatus.ACTIVE,
+        },
+      })) > 0;
+
+    if (!hasOtherActiveMembership) {
+      await tx.user.update({
+        where: { uuid: current.userUuid },
+        data: {
+          status: UserStatus.INACTIVE,
+          deletedAt: now,
+          sessionsRevokedAt: now,
+        },
+      });
+      await tx.userSession.updateMany({
+        where: { userUuid: current.userUuid, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      await tx.userActivationToken.updateMany({
+        where: {
+          userUuid: current.userUuid,
+          usedAt: null,
+          revokedAt: null,
+        },
+        data: { revokedAt: now, encryptedToken: null },
+      });
+      await tx.userPasswordResetToken.updateMany({
+        where: {
+          userUuid: current.userUuid,
+          usedAt: null,
+          revokedAt: null,
+        },
+        data: { revokedAt: now },
+      });
+    }
+  });
+
+  await writeAuthAudit({
+    action: "TENANT_USER_REMOVED",
+    actorUserUuid: session.userId,
+    tenantUuid: session.tenantId,
+    targetType: "user",
+    targetUuid: membership.userUuid,
+    metadata: {
+      email: membership.user.email,
+      role: membership.role.code,
+      membershipUuid: membership.uuid,
+    },
+  });
+
+  return true;
 }

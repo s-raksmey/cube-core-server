@@ -12,7 +12,6 @@ const ROLE_IDS = {
   SUPERADMIN: "00000000-0000-4000-8000-000000000001",
   ADMIN: "00000000-0000-4000-8000-000000000002",
   EDITOR: "00000000-0000-4000-8000-000000000003",
-  AUTHOR: "00000000-0000-4000-8000-000000000004",
 } as const;
 
 async function ensureRoles() {
@@ -34,12 +33,6 @@ async function ensureRoles() {
       code: "EDITOR",
       name: "Editor",
       description: "Sub-tenant editor",
-    },
-    {
-      uuid: ROLE_IDS.AUTHOR,
-      code: "AUTHOR",
-      name: "Author",
-      description: "Sub-tenant author",
     },
   ] as const;
 

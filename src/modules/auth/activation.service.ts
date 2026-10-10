@@ -2,7 +2,7 @@ import { AuthAudience, UserStatus, type Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/src/lib/db";
 import { ACTIVATION_TTL_MS } from "@/src/lib/auth/constants";
-import { hashToken, randomToken } from "@/src/lib/auth/crypto";
+import { decryptAtRest, encryptAtRest, hashToken, randomToken } from "@/src/lib/auth/crypto";
 import { verifyChallengeToken } from "@/src/lib/auth/session";
 import {
   hashPassword,
@@ -70,36 +70,45 @@ async function loadValidActivationToken(token: string) {
   return row;
 }
 
-export async function createActivationToken(input: {
+export async function createActivationToken(
+  input: {
   userUuid: string;
   createdByUuid: string;
   /** Defaults to ADMIN_CONSOLE (Main Console activate page). */
   audience?: AuthAudience;
-}) {
+  },
+  transaction?: Prisma.TransactionClient,
+) {
   const rawToken = randomToken(32);
   const tokenHash = hashToken(rawToken);
   const expiresAt = new Date(Date.now() + ACTIVATION_TTL_MS);
+  const audience = input.audience ?? AuthAudience.ADMIN_CONSOLE;
 
-  await prisma.$transaction([
-    prisma.userActivationToken.updateMany({
+  const persist = async (tx: Prisma.TransactionClient) => {
+    await tx.userActivationToken.updateMany({
       where: {
         userUuid: input.userUuid,
         usedAt: null,
         revokedAt: null,
       },
-      data: { revokedAt: new Date() },
-    }),
-    prisma.userActivationToken.create({
+      data: { revokedAt: new Date(), encryptedToken: null },
+    });
+    await tx.userActivationToken.create({
       data: {
         userUuid: input.userUuid,
         tokenHash,
+        encryptedToken:
+          audience === AuthAudience.ADMIN_CONSOLE
+            ? encryptAtRest(rawToken)
+            : null,
         expiresAt,
         createdByUuid: input.createdByUuid,
       },
-    }),
-  ]);
+    });
+  };
+  if (transaction) await persist(transaction);
+  else await prisma.$transaction(persist);
 
-  const audience = input.audience ?? AuthAudience.ADMIN_CONSOLE;
   const baseUrl = (
     audience === AuthAudience.TENANT_APP
       ? (process.env.TENANT_APP_URL ?? "http://localhost:3001")
@@ -108,6 +117,30 @@ export async function createActivationToken(input: {
   return {
     activationUrl: `${baseUrl}/activate?token=${encodeURIComponent(rawToken)}`,
     expiresAt: expiresAt.toISOString(),
+  };
+}
+
+export async function getExistingActivationLink(userUuid: string) {
+  const now = new Date();
+  const row = await prisma.userActivationToken.findFirst({
+    where: {
+      userUuid,
+      usedAt: null,
+      revokedAt: null,
+      expiresAt: { gt: now },
+      encryptedToken: { not: null },
+      user: { status: UserStatus.PENDING, deletedAt: null },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { encryptedToken: true, expiresAt: true },
+  });
+  if (!row?.encryptedToken) return null;
+
+  const baseUrl = (process.env.ADMIN_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const token = decryptAtRest(row.encryptedToken);
+  return {
+    activationUrl: `${baseUrl}/activate?token=${encodeURIComponent(token)}`,
+    expiresAt: row.expiresAt.toISOString(),
   };
 }
 
@@ -247,7 +280,7 @@ export async function completeActivationTotp(input: {
           revokedAt: null,
           expiresAt: { gt: now },
         },
-        data: { usedAt: now },
+        data: { usedAt: now, encryptedToken: null },
       });
       if (mark.count !== 1) throw unauthenticated("Activation link already used");
 
@@ -270,7 +303,7 @@ export async function completeActivationTotp(input: {
           revokedAt: null,
           uuid: { not: row.uuid },
         },
-        data: { revokedAt: now },
+        data: { revokedAt: now, encryptedToken: null },
       });
     },
   });

@@ -2,7 +2,7 @@ import { AuthAudience, UserStatus } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/src/lib/db";
 import { ACTIVATION_TTL_MS } from "@/src/lib/auth/constants";
-import { hashToken, randomToken } from "@/src/lib/auth/crypto";
+import { encryptAtRest, hashToken, randomToken } from "@/src/lib/auth/crypto";
 import {
   hashPassword,
   passwordPolicySchema,
@@ -65,6 +65,7 @@ export async function createActivationToken(input: {
   const rawToken = randomToken(32);
   const tokenHash = hashToken(rawToken);
   const expiresAt = new Date(Date.now() + ACTIVATION_TTL_MS);
+  const audience = input.audience ?? AuthAudience.ADMIN_CONSOLE;
 
   await prisma.$transaction([
     prisma.userActivationToken.updateMany({
@@ -73,19 +74,22 @@ export async function createActivationToken(input: {
         usedAt: null,
         revokedAt: null,
       },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: new Date(), encryptedToken: null },
     }),
     prisma.userActivationToken.create({
       data: {
         userUuid: input.userUuid,
         tokenHash,
+        encryptedToken:
+          audience === AuthAudience.ADMIN_CONSOLE
+            ? encryptAtRest(rawToken)
+            : null,
         expiresAt,
         createdByUuid: input.createdByUuid,
       },
     }),
   ]);
 
-  const audience = input.audience ?? AuthAudience.ADMIN_CONSOLE;
   const baseUrl = (
     audience === AuthAudience.TENANT_APP
       ? (process.env.TENANT_APP_URL ?? "http://localhost:3001")
@@ -209,7 +213,7 @@ export async function completeActivationTotp(input: {
   await prisma.$transaction(async (tx) => {
     const mark = await tx.userActivationToken.updateMany({
       where: { uuid: row.uuid, usedAt: null, revokedAt: null },
-      data: { usedAt: new Date() },
+      data: { usedAt: new Date(), encryptedToken: null },
     });
     if (mark.count !== 1) {
       throw unauthenticated("Activation link already used");
@@ -230,7 +234,7 @@ export async function completeActivationTotp(input: {
         revokedAt: null,
         uuid: { not: row.uuid },
       },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: new Date(), encryptedToken: null },
     });
   });
 

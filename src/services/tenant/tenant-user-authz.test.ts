@@ -11,7 +11,7 @@ describe("sub-tenant user management matrix", () => {
     role === "ADMIN" ||
     role === "EDITOR" ||
     role === "SUPERADMIN";
-  const allowedInviteRoles = ["ADMIN", "EDITOR", "AUTHOR"] as const;
+  const allowedInviteRoles = ["ADMIN", "EDITOR"] as const;
 
   it("only Admin (and SuperAdmin remote) may invite users", () => {
     expect(canInviteUsers("ADMIN")).toBe(true);
@@ -24,12 +24,8 @@ describe("sub-tenant user management matrix", () => {
     expect(canInviteUsers("EDITOR")).toBe(false);
   });
 
-  it("Author has no user-management invite privilege", () => {
-    expect(canInviteUsers("AUTHOR")).toBe(false);
-  });
-
-  it("invite roles are only ADMIN, EDITOR, AUTHOR", () => {
-    expect(allowedInviteRoles).toEqual(["ADMIN", "EDITOR", "AUTHOR"]);
+  it("invite roles are only ADMIN and EDITOR", () => {
+    expect(allowedInviteRoles).toEqual(["ADMIN", "EDITOR"]);
     expect(allowedInviteRoles).not.toContain("SUPERADMIN");
   });
 });

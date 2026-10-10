@@ -21,7 +21,7 @@ enum UserStatus {
   PENDING
   ACTIVE
   LOCKED
-  DISABLED
+  INACTIVE
 }
 
 enum MembershipStatus {
@@ -138,6 +138,7 @@ model UserActivationToken {
   userUuid      String    @map("user_uuid")
   user          User      @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
   tokenHash     String    @unique @map("token_hash")
+  encryptedToken String?   @map("encrypted_token")
   expiresAt     DateTime  @map("expires_at")
   usedAt        DateTime? @map("used_at")
   revokedAt     DateTime? @map("revoked_at")

@@ -28,6 +28,7 @@ import { forbidden, unauthenticated, validationError } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import {
   accountLockedNotice,
+  accountStatusLoginNotice,
   clearExpiredAccountLockout,
   failedAttemptNotice,
   recordFailedAuthAttempt,
@@ -39,7 +40,10 @@ import {
   mapAuthUser,
 } from "@/src/modules/users/account";
 
-async function loadChallenge(challengeToken: string) {
+async function loadChallenge(
+  challengeToken: string,
+  options: { allowPendingActivation?: boolean } = {},
+) {
   let payload;
   try {
     payload = await verifyChallengeToken(challengeToken);
@@ -78,6 +82,16 @@ async function loadChallenge(challengeToken: string) {
     if (!account || account.status === "LOCKED") {
       throw unauthenticated(accountLockedNotice(account?.lockedUntil ?? null));
     }
+  }
+
+  const statusNotice = accountStatusLoginNotice(account.status);
+  const pendingActivationEnrollment =
+    options.allowPendingActivation === true &&
+    challenge.type === AuthChallengeType.TOTP_ENROLL &&
+    challenge.audience === AuthAudience.ADMIN_CONSOLE &&
+    account.status === "PENDING";
+  if (statusNotice && !pendingActivationEnrollment) {
+    throw unauthenticated(statusNotice);
   }
 
   return { challenge, payload, account };
@@ -219,7 +233,9 @@ export async function verifyTotpEnrollment(input: {
   issueSession?: boolean;
   onEnrollmentVerified?: (tx: Prisma.TransactionClient) => Promise<void>;
 }) {
-  const { challenge, account } = await loadChallenge(input.challengeToken);
+  const { challenge, account } = await loadChallenge(input.challengeToken, {
+    allowPendingActivation: true,
+  });
   if (challenge.type !== "TOTP_ENROLL") {
     throw validationError("Invalid enrollment challenge");
   }

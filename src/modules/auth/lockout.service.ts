@@ -12,6 +12,16 @@ export type FailedAuthMethod = "password" | "totp";
 export const INVALID_PASSWORD_LOGIN_NOTICE =
   "Incorrect username/email or password. Try again, or contact your administrator if your account is locked.";
 
+export function accountStatusLoginNotice(status: UserStatus) {
+  if (status === UserStatus.PENDING) {
+    return "Your account is pending activation. Use your activation link to finish setup, or contact your SuperAdmin for help.";
+  }
+  if (status === UserStatus.INACTIVE) {
+    return "Your account is inactive. Contact your SuperAdmin to restore access.";
+  }
+  return null;
+}
+
 export function failedAttemptOutcome(count: number) {
   return count >= MAX_ACCOUNT_AUTH_ATTEMPTS
     ? { locked: true as const, remaining: 0 }

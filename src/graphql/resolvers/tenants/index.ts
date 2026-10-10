@@ -4,6 +4,7 @@ import { tenantsUsersResolver } from "@/src/graphql/resolvers/tenants/tenants-us
 import { tenantsCreateResolver } from "@/src/graphql/resolvers/tenants/tenants-create-resolver";
 import { tenantsSetStatusResolver } from "@/src/graphql/resolvers/tenants/tenants-set-status-resolver";
 import { tenantsCreateAdminUserResolver } from "@/src/graphql/resolvers/tenants/tenants-create-admin-user-resolver";
+import { tenantsDeleteUserResolver } from "@/src/graphql/resolvers/tenants/tenants-delete-user-resolver";
 
 export const tenantsResolvers = mergeResolvers(
   tenantsListResolver,
@@ -11,4 +12,5 @@ export const tenantsResolvers = mergeResolvers(
   tenantsCreateResolver,
   tenantsSetStatusResolver,
   tenantsCreateAdminUserResolver,
+  tenantsDeleteUserResolver,
 );

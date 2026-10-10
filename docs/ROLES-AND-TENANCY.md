@@ -8,10 +8,10 @@ Platform (Cube Core)
     ├── SuperAdmin users (via tenant_memberships)
     ├── Platform settings / defaults
     └── Sub-tenant A
-    │   ├── Admin / Editor / Author (scoped to A)
+    │   ├── Admin / Editor (scoped to A)
     │   └── Tenant app users / data for A
     └── Sub-tenant B
-        ├── Admin / Editor / Author (scoped to B)
+        ├── Admin / Editor (scoped to B)
         └── Tenant app users / data for B
 ```
 
@@ -21,8 +21,8 @@ One `tenants` table (`MAIN` / `SUB`). **Users are unified**:
 
 | Table | Purpose |
 | --- | --- |
-| `users` | Identity: names, optional username, unique email, password hash, status `PENDING` \| `ACTIVE` \| `DISABLED` |
-| `roles` | Seeded: `SUPERADMIN`, `ADMIN`, `EDITOR`, `AUTHOR` |
+| `users` | Identity: names, optional username, unique email, password hash, status `PENDING` \| `ACTIVE` \| `LOCKED` \| `INACTIVE` |
+| `roles` | Seeded: `SUPERADMIN`, `ADMIN`, `EDITOR` |
 | `tenant_memberships` | Unique `(user_uuid, tenant_uuid)` + role |
 
 | Role | Tenant type | Responsibility |
@@ -30,9 +30,8 @@ One `tenants` table (`MAIN` / `SUB`). **Users are unified**:
 | `SUPERADMIN` | MAIN only | Operate platform; manage sub-tenants and their users remotely |
 | `ADMIN` | SUB | Full management inside that sub-tenant (including inviting users) |
 | `EDITOR` | SUB | Day-to-day editing inside that sub-tenant |
-| `AUTHOR` | SUB | Content authoring inside that sub-tenant (no user management) |
 
-Domain services enforce: MAIN membership ↔ SUPERADMIN; SUB membership ↔ ADMIN \| EDITOR \| AUTHOR.
+Domain services enforce: MAIN membership ↔ SUPERADMIN; SUB membership ↔ ADMIN \| EDITOR.
 
 Auth rows (`user_sessions`, challenges, TOTP, activation/reset tokens, recovery codes) reference `users.uuid`.
 
@@ -42,10 +41,10 @@ Auth rows (`user_sessions`, challenges, TOTP, activation/reset tokens, recovery 
 
 1. SuperAdmin sessions always belong to the **main tenant (`core-super-admin`)**.
 2. SuperAdmin **cannot** authenticate into `cube-core-tenant` for any sub-tenant.
-3. SuperAdmin **cannot** switch identity / session into an Admin/Editor/Author.
+3. SuperAdmin **cannot** switch identity / session into an Admin or Editor.
 4. SuperAdmin manages sub-tenants **remotely** from the main-tenant console via privileged APIs.
 
-Only **Admin**, **Editor**, and **Author** may hold a login scoped to a sub-tenant.
+Only **Admin** and **Editor** may hold a login scoped to a sub-tenant.
 
 ## Tenant types
 
@@ -58,12 +57,12 @@ Only **Admin**, **Editor**, and **Author** may hold a login scoped to a sub-tena
 
 1. A user may have memberships, but login resolves an active membership for the requested audience.
 2. SuperAdmin users belong to the **main tenant**.
-3. Admin / Editor / Author belong to a **sub-tenant**.
+3. Admin / Editor belong to a **sub-tenant**.
 4. Authorization is always: `role` + `tenantId` (+ resource ownership checks).
 5. UI may hide actions, but **server must reject** unauthorized GraphQL operations.
 6. Login target is validated against role + tenant type + audience:
    - `ADMIN_CONSOLE` → **SuperAdmin only** (main tenant)
-   - `TENANT_APP` → **Admin, Editor, or Author** on a sub-tenant only
+   - `TENANT_APP` → **Admin or Editor** on a sub-tenant only
    - SuperAdmin credentials must be rejected by the tenant app login path
 
 ## Activation lifecycle
@@ -93,7 +92,7 @@ User
   - username (nullable until activation)
   - email (unique)
   - password_hash (nullable until activation)
-  - status: PENDING | ACTIVE | DISABLED
+  - status: PENDING | ACTIVE | LOCKED | INACTIVE
 
 Role
   - uuid, code

@@ -6,9 +6,6 @@ export const authCompletePasswordResetResolver = {
       _: unknown,
       args: {
         token: string;
-        firstName?: string | null;
-        lastName?: string | null;
-        fullName?: string | null;
         password: string;
         confirmPassword: string;
       },
@@ -17,9 +14,6 @@ export const authCompletePasswordResetResolver = {
         token: args.token,
         password: args.password,
         confirmPassword: args.confirmPassword,
-        ...(args.firstName != null ? { firstName: args.firstName } : {}),
-        ...(args.lastName != null ? { lastName: args.lastName } : {}),
-        ...(args.fullName != null ? { fullName: args.fullName } : {}),
       });
     },
   },

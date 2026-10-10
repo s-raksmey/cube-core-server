@@ -41,7 +41,7 @@ describe("assertCanRemoveLastActiveSuperAdmin", () => {
       assertCanRemoveLastActiveSuperAdmin({
         targetUserId: "other",
         actorUserId: "me",
-        targetStatus: UserStatus.DISABLED,
+        targetStatus: UserStatus.INACTIVE,
         activeSuperAdminCount: 1,
       }),
     ).not.toThrow();

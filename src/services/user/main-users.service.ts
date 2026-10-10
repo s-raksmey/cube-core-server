@@ -30,7 +30,7 @@ const updateSchema = z.object({
   email: z.string().trim().email().max(254).optional(),
   firstName: namePart.optional(),
   lastName: namePart.optional(),
-  status: z.enum(["ACTIVE", "DISABLED", "PENDING"]).optional(),
+  status: z.enum(["ACTIVE", "INACTIVE", "PENDING"]).optional(),
 });
 const listSchema = z.object({
   search: z.string().trim().max(120).optional(),
@@ -51,7 +51,7 @@ export function assertCanRemoveLastActiveSuperAdmin(options: {
   const disablingActive =
     options.targetStatus === UserStatus.ACTIVE &&
     (options.nextStatus === undefined ||
-      options.nextStatus === UserStatus.DISABLED);
+      options.nextStatus === UserStatus.INACTIVE);
   if (disablingActive && options.activeSuperAdminCount <= 1) {
     throw validationError("Cannot remove the last active SuperAdmin account");
   }
@@ -222,7 +222,7 @@ export async function updateMainTenantUser(
     email?: string;
     firstName?: string;
     lastName?: string;
-    status?: "ACTIVE" | "DISABLED" | "PENDING";
+    status?: "ACTIVE" | "INACTIVE" | "PENDING";
   },
 ) {
   await requireSuperAdmin(session);
@@ -240,12 +240,12 @@ export async function updateMainTenantUser(
     throw validationError("User not found");
   }
 
-  if (parsed.data.status === UserStatus.DISABLED) {
+  if (parsed.data.status === UserStatus.INACTIVE) {
     assertCanRemoveLastActiveSuperAdmin({
       targetUserId: existing.uuid,
       actorUserId: session.userId,
       targetStatus: existing.status,
-      nextStatus: UserStatus.DISABLED,
+      nextStatus: UserStatus.INACTIVE,
       activeSuperAdminCount: await countActiveSuperAdmins(),
     });
   }
@@ -275,13 +275,13 @@ export async function updateMainTenantUser(
   });
 
   if (
-    parsed.data.status === UserStatus.DISABLED &&
+    parsed.data.status === UserStatus.INACTIVE &&
     existing.status === UserStatus.ACTIVE
   ) {
     await revokeAllUserSessions(existing.uuid);
     await prisma.userActivationToken.updateMany({
       where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: new Date(), encryptedToken: null },
     });
     await prisma.userPasswordResetToken.updateMany({
       where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
@@ -325,14 +325,14 @@ export async function deleteMainTenantUser(
   await prisma.user.update({
     where: { uuid: existing.uuid },
     data: {
-      status: UserStatus.DISABLED,
+      status: UserStatus.INACTIVE,
       deletedAt: new Date(),
     },
   });
   await revokeAllUserSessions(existing.uuid);
   await prisma.userActivationToken.updateMany({
     where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
-    data: { revokedAt: new Date() },
+    data: { revokedAt: new Date(), encryptedToken: null },
   });
   await prisma.userPasswordResetToken.updateMany({
     where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },

@@ -85,7 +85,7 @@ describe("assertConsoleAuthorization", () => {
     ).not.toThrow();
   });
 
-  it("allows SUB Author on tenant console", () => {
+  it("rejects unsupported SUB Author on tenant console", () => {
     expect(() =>
       assertConsoleAuthorization(
         account({
@@ -94,6 +94,6 @@ describe("assertConsoleAuthorization", () => {
         }),
         "TENANT_APP",
       ),
-    ).not.toThrow();
+    ).toThrow();
   });
 });

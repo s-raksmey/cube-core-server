@@ -5,6 +5,7 @@ import { unauthenticated } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import {
   accountLockedNotice,
+  accountStatusLoginNotice,
   clearExpiredAccountLockout,
   failedAttemptNotice,
   INVALID_PASSWORD_LOGIN_NOTICE,
@@ -58,6 +59,20 @@ export async function loginWithPassword(
     const unlocked = await clearExpiredAccountLockout(account.uuid);
     if (unlocked) account = await findAccountByEmailOrUsername(normalizedId);
     else throw unauthenticated(accountLockedNotice(account.lockedUntil));
+  }
+
+  if (account) {
+    const statusNotice = accountStatusLoginNotice(account.status);
+    if (statusNotice) {
+      await writeAuthAudit({
+        action: "auth.login.rejected_status",
+        actorUserUuid: account.uuid,
+        tenantUuid: account.tenantUuid,
+        correlationId,
+        metadata: { status: account.status, audience },
+      });
+      throw unauthenticated(statusNotice);
+    }
   }
 
   if (!account || account.status !== UserStatus.ACTIVE || !account.passwordHash) {

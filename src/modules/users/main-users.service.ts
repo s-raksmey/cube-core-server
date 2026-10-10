@@ -8,7 +8,10 @@ import { z } from "zod";
 import { prisma } from "@/src/lib/db";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden, validationError } from "@/src/lib/errors";
-import { createActivationToken } from "@/src/modules/auth/activation.service";
+import {
+  createActivationToken,
+  getExistingActivationLink,
+} from "@/src/modules/auth/activation.service";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import { revokeAllUserSessions } from "@/src/modules/auth/session.service";
 import {
@@ -30,7 +33,7 @@ const updateSchema = z.object({
   email: z.string().trim().email().max(254).optional(),
   firstName: namePart.optional(),
   lastName: namePart.optional(),
-  status: z.enum(["ACTIVE", "LOCKED", "DISABLED", "PENDING"]).optional(),
+  status: z.enum(["ACTIVE", "LOCKED", "INACTIVE", "PENDING"]).optional(),
 });
 const listSchema = z.object({
   search: z.string().trim().max(120).optional(),
@@ -64,7 +67,12 @@ async function requireSuperAdmin(session: SessionPayload) {
 async function lockSuperAdminRoster(tx: Prisma.TransactionClient) {
   // Serialize roster-removal checks so two concurrent requests cannot both
   // observe themselves as leaving one usable account behind.
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(1129665109, 1)`;
+  // Select a scalar from the lock CTE so Prisma doesn't try to deserialize
+  // PostgreSQL's `void` return value from pg_advisory_xact_lock.
+  await tx.$queryRaw`WITH roster_lock AS MATERIALIZED (
+    SELECT pg_advisory_xact_lock(1129665109, 1)
+  )
+  SELECT 1 AS locked FROM roster_lock`;
 }
 
 async function countActiveSuperAdmins(client: typeof prisma | Prisma.TransactionClient = prisma) {
@@ -310,7 +318,7 @@ export async function updateMainTenantUser(
     await revokeAllUserSessions(existing.uuid);
     await prisma.userActivationToken.updateMany({
       where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
-      data: { revokedAt: new Date() },
+      data: { revokedAt: new Date(), encryptedToken: null },
     });
     await prisma.userPasswordResetToken.updateMany({
       where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
@@ -361,7 +369,7 @@ export async function deleteMainTenantUser(
     await tx.user.update({
       where: { uuid: existing.uuid },
       data: {
-        status: UserStatus.DISABLED,
+        status: UserStatus.INACTIVE,
         deletedAt: now,
         sessionsRevokedAt: now,
       },
@@ -372,7 +380,7 @@ export async function deleteMainTenantUser(
     });
     await tx.userActivationToken.updateMany({
       where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
-      data: { revokedAt: now },
+      data: { revokedAt: now, encryptedToken: null },
     });
     await tx.userPasswordResetToken.updateMany({
       where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
@@ -405,13 +413,61 @@ export async function generateMainTenantUserActivationLink(
   ) {
     throw validationError("User not found");
   }
-  if (existing.totpEnabledAt && existing.status === UserStatus.ACTIVE) {
-    throw validationError("User is already activated; use password reset instead");
-  }
+  const activation = await prisma.$transaction(async (tx) => {
+    const current = await tx.user.findUnique({
+      where: { uuid: existing.uuid },
+      include: { twoFactorAuth: true },
+    });
+    if (
+      !current ||
+      current.activatedAt ||
+      current.twoFactorAuth?.enabledAt ||
+      (current.status !== UserStatus.PENDING &&
+        current.status !== UserStatus.LOCKED)
+    ) {
+      throw validationError("This account has already been activated; use password reset instead");
+    }
 
-  const activation = await createActivationToken({
-    userUuid: existing.uuid,
-    createdByUuid: session.userId,
+    const now = new Date();
+    await tx.user.update({
+      where: { uuid: current.uuid },
+      data: {
+        username: null,
+        passwordHash: null,
+        status: UserStatus.PENDING,
+        activatedAt: null,
+        failedPasswordAttempts: 0,
+        failedTotpAttempts: 0,
+        lockedUntil: null,
+        sessionsRevokedAt: now,
+      },
+    });
+    await tx.userTwoFactorAuth.updateMany({
+      where: { userUuid: current.uuid },
+      data: {
+        encryptedSecret: null,
+        pendingEncryptedSecret: null,
+        pendingExpiresAt: null,
+        enabledAt: null,
+      },
+    });
+    await tx.authLoginChallenge.updateMany({
+      where: {
+        userUuid: current.uuid,
+        type: "TOTP_ENROLL",
+        consumedAt: null,
+      },
+      data: { consumedAt: now },
+    });
+    await tx.userRecoveryCode.deleteMany({ where: { userUuid: current.uuid } });
+    await tx.userSession.updateMany({
+      where: { userUuid: current.uuid, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    return createActivationToken(
+      { userUuid: current.uuid, createdByUuid: session.userId },
+      tx,
+    );
   });
 
   await writeAuthAudit({
@@ -427,6 +483,33 @@ export async function generateMainTenantUserActivationLink(
     expiresAt: activation.expiresAt,
     user: await mapMainRow(existing.uuid),
   };
+}
+
+export async function getMainTenantUserActivationLink(
+  session: SessionPayload,
+  userId: string,
+) {
+  await requireSuperAdmin(session);
+  const existing = await findAccountByUuid(userId);
+  if (
+    !existing ||
+    existing.tenant.type !== TenantType.MAIN ||
+    existing.roleCode !== "SUPERADMIN"
+  ) {
+    throw validationError("User not found");
+  }
+
+  const link = await getExistingActivationLink(existing.uuid);
+  if (!link) return null;
+
+  await writeAuthAudit({
+    action: "auth.activation.link_viewed",
+    actorUserUuid: session.userId,
+    tenantUuid: session.tenantId,
+    targetType: "user",
+    targetUuid: existing.uuid,
+  });
+  return link;
 }
 
 export { generateMainTenantUserPasswordResetLink };

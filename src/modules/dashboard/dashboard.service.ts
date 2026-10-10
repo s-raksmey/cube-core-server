@@ -144,10 +144,9 @@ export async function getPlatformDashboard(session: SessionPayload) {
 export async function getTenantDashboard(session: SessionPayload) {
   if (
     session.role !== "ADMIN" &&
-    session.role !== "EDITOR" &&
-    session.role !== "AUTHOR"
+    session.role !== "EDITOR"
   ) {
-    throw forbidden("Tenant dashboard requires Admin, Editor, or Author");
+    throw forbidden("Tenant dashboard requires Admin or Editor");
   }
 
   const tenant = await prisma.tenant.findUnique({

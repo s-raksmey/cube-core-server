@@ -12,7 +12,7 @@ Access tokens (5m) use `management_console_*_access` cookies. Refresh tokens las
 ## Authorization
 
 - **Main console:** `SUPERADMIN` on the main tenant only.
-- **Sub-tenant console:** `ADMIN`, `EDITOR`, or `AUTHOR` on a sub-tenant only.
+- **Sub-tenant console:** `ADMIN` or `EDITOR` on a sub-tenant only.
 - SuperAdmin cannot authenticate into the tenant console.
 - Sub-tenant roles cannot authenticate into the main console.
 
@@ -33,7 +33,7 @@ The admin uses typed, generated GraphQL documents from a Server Action for authe
 
 ## Activation
 
-1. Privileged create → `PENDING` user + membership + hashed activation token (~24h).
+1. Privileged create → `PENDING` user + membership + hashed activation token (~24h); the token is also encrypted at rest so an authorized SuperAdmin can recover the current link without rotating it. The encrypted copy is cleared when the token is used or revoked.
 2. `/activate?token=…`: **username** + password + confirm (token stays open).
 3. Mandatory TOTP enroll + verify.
 4. Recovery codes shown once; token consumed; status → `ACTIVE`.
