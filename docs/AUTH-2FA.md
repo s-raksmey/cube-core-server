@@ -18,13 +18,13 @@ Access tokens (30s) use `management_console_*_access` cookies. Refresh tokens la
 
 ## Login sequence
 
-1. Password verification by **username or email** (`POST /api/auth/login`).
-2. Short-lived signed **challenge** (no protected API access).
-3. First login (if 2FA not yet enabled): TOTP enrollment (QR shown once) + 6-digit verification.
-4. Returning login: 6-digit TOTP (recovery codes accepted on the recovery path).
-5. Session creation only after successful 2FA.
+1. Password verification by **username or email** (GraphQL `login` — server is GraphQL-only).
+2. Short-lived signed **challenge** (no protected session).
+3. First login (if 2FA not yet enabled): TOTP enrollment (QR shown once) + GraphQL `verifyTotpEnrollment`.
+4. Returning login: GraphQL `verifyLoginTotp` (or `verifyRecoveryCode`).
+5. Admin Server Action sets HttpOnly access/refresh cookies; then hard navigate to the console.
 
-Frontends proxy through their BFF (`cube-core-admin` / `cube-core-tenant` `/api/auth/*`).
+`cube-core-admin` uses Apollo → `/graphql` rewrite → server (no auth HTTP proxy routes on admin).
 
 ## Activation
 

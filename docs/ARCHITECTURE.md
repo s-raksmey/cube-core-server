@@ -16,7 +16,7 @@ Cursor agents must follow `.cursor/rules/cube-core-architecture.mdc` (mirrored i
                              ▼
                  ┌───────────────────────┐
                  │   cube-core-server    │
-                 │ Next.js + GraphQL API │
+                 │ GraphQL Yoga (HTTP)   │
                  │ Auth / Domain / Audit │
                  └───────────┬───────────┘
                              ▼
@@ -27,7 +27,7 @@ Cursor agents must follow `.cursor/rules/cube-core-architecture.mdc` (mirrored i
 
 ## Recommended style
 
-**Modular monolith API** in `cube-core-server`, with separate Next.js frontends.
+**Modular monolith** in `cube-core-server`, with separate Next.js frontends.
 
 Why this fits now:
 
@@ -49,53 +49,60 @@ Avoid starting with many microservices. The risk is duplicated auth/tenant logic
 - Database access
 - Background-safe utility endpoints (health, webhooks later)
 
-Suggested internal folders (when implementation starts):
+Internal layout:
 
 ```text
-app/
-  api/graphql/          # GraphQL HTTP handler
 src/
+  index.ts              # Node HTTP + GraphQL Yoga → /graphql only
   modules/
     auth/
     tenants/
     users/
-    audit/
-    platform/
+    dashboard/
   graphql/
-    schema/
-    resolvers/
+    schema.graphql      # single SDL contract (auth + domain)
+    helpers.ts          # requireSession, mergeResolvers
     context.ts
+    resolvers/
+      index.ts          # createSchema + merge domain maps
+      types.ts          # LoginResult / Tenant / User field resolvers
+      auth/             # one file per auth operation + index.ts
+      dashboard/
+      tenants/
+      users/
   lib/
     db/
     auth/
     errors/
-    validation/
 ```
+
+The server is **GraphQL-only** — no Next.js `app/`, no REST `/auth` or `/api` routes. Login, 2FA, activation, password reset, and refresh are GraphQL queries/mutations.
+
+Keep **one** SDL file (`schema.graphql`). Split **resolvers** by domain folder with one operation per file (`*-resolver.ts` + domain `index.ts`). Domain business logic stays in `src/modules/*` — resolvers stay thin.
 
 ### `cube-core-admin` (management console)
 
-- SuperAdmin + Admin UI only
-- Calls GraphQL for all privileged operations
-- Shows navigation based on role
-- Never stores secrets beyond session cookies / tokens needed for auth
+- SuperAdmin UI only
+- Console **data + auth** via Apollo (`src/graphql/*.gql` → `lib/apollo`); types via `npm run graphql:codegen`
+- No HTTP route folder on admin — Next rewrite `/graphql` → server; HttpOnly cookies via Server Actions
+- Never stores session tokens in `localStorage` or JS-readable cookies
 - Tailwind + **shadcn/ui** for layout/components
 
-Suggested areas:
+Layout (`src/` app — Next.js `src` directory):
 
 ```text
-app/
-  (auth)/login
-  (console)/dashboard
-  (console)/tenants          # SuperAdmin
-  (console)/admins           # SuperAdmin
-  (console)/users            # Admin (+ SuperAdmin)
-  (console)/settings
-  (console)/audit
 src/
+  app/                       # routes: login, activate, (console)/…
   components/
-  graphql/
-  lib/auth/
-  lib/rbac/
+  hooks/
+  graphql/*.gql              # GraphQL documents only
+  lib/
+    apollo/operations.ts     # Apollo document exports
+    apollo/types.ts          # Apollo operation types
+    apollo/generated/        # codegen output
+    auth/session-actions.ts  # HttpOnly cookie establish/refresh/clear
+    auth/upstream-actions.ts # server-only activate/reset helpers
+next.config.ts               # rewrite /graphql → GRAPHQL_SERVER_URL
 ```
 
 ### `cube-core-tenant` (sub-tenant product app)
@@ -105,12 +112,14 @@ src/
 - Strictly scoped to one sub-tenant
 - No platform management screens
 - SuperAdmin must be rejected at login (cannot enter sub-tenant app)
+- Next.js `src/` layout (`src/app`, `src/components`, `src/lib`, …)
 
 ### `cube-core-website` (marketing)
 
 - Public pages only
 - No direct privileged GraphQL mutations
 - May deep-link to admin/tenant login
+- Next.js `src/` layout (`src/app`, `src/components`, `src/lib`, …)
 
 ## Request / data flow
 
@@ -119,12 +128,11 @@ src/
 ```text
 User opens `/` (landing) → Get Started navigates to `/login`
   → User submits credentials on `/login`
-  → admin BFF POST /api/auth/login (Zod-validated body)
-  → BFF calls GraphQL mutation login(audience: ADMIN_CONSOLE)
+  → Apollo mutation login(audience: ADMIN_CONSOLE) via `/graphql` rewrite
   → server validates user + tenant status + audience rules
-  → server returns session token (jose)
-  → BFF sets audience-specific HTTP-only cookies; no public signup on admin
-  → subsequent GraphQL requests send session cookie
+  → challenge → verifyLoginTotp / verifyTotpEnrollment / verifyRecoveryCode
+  → AuthPayload → Server Action sets HttpOnly access/refresh cookies
+  → subsequent GraphQL requests include cookies (ensureAdminSession refreshes access)
   → server builds GraphQL context { user, role, tenantId }
   → resolver checks permission matrix
   → returns scoped data
@@ -167,27 +175,32 @@ Admin opens Users page
   → returns only that sub-tenant’s users
 ```
 
-## GraphQL API shape (initial)
+## GraphQL shape (current)
+
+Single data contract: GraphQL on the server (`/graphql` only). **Admin** reaches it via same-origin `/graphql` (Next rewrite) and sets **HttpOnly** session cookies with Server Actions after auth mutations — no HTTP proxy routes on admin. Activation / password-reset / refresh use GraphQL; admin Server Actions (`lib/auth/upstream-actions.ts`, `session-actions.ts`) call the server GraphQL endpoint. Do **not** put session tokens in `localStorage` or JS-readable cookies.
 
 ### Queries
 
 - `me`
-- `mainTenant` (SuperAdmin)
-- `subTenants` / `subTenant(id|slug)` (SuperAdmin)
-- `tenantUsers` (scoped)
-- `auditLogs` (scoped by role)
-- `platformDashboard` (SuperAdmin)
-- `tenantDashboard` (Admin only for own tenant; SuperAdmin uses management queries with `targetTenantId`, not a sub-tenant session)
+- `platformDashboard` (SuperAdmin / `ADMIN_CONSOLE`)
+- `tenantDashboard` (sub-tenant session only)
+- `subTenants` (SuperAdmin)
+- `mainTenantUsers` / `mainTenantUser` (SuperAdmin — MAIN SUPERADMIN memberships)
+- `tenantUsers` (sub-tenant scoped)
+- `validateActivationToken` / `validatePasswordResetToken`
 
 ### Mutations
 
-- `login` / `logout` / `requestPasswordReset` / `resetPassword`
-- `updateMainTenant`
-- `createSubTenant` / `updateSubTenant` / `setSubTenantStatus`
-- `createAdminUser` / `updateUser` / `setUserStatus`
-- `updateTenantSettings`
+- `login` / `verifyLoginTotp` / `verifyTotpEnrollment` / `verifyRecoveryCode` / `logout`
+- `refreshSession`
+- `completeActivation` / `completeActivationTotp` / `completePasswordReset`
+- `generatePasswordResetLink` (sub-tenant target; SuperAdmin only)
+- `generateMainTenantUserPasswordResetLink` / `generateMainTenantUserActivationLink`
+- `createSubTenant` / `setSubTenantStatus`
+- `createAdminUser` (sub-tenant invite + activation URL)
+- `createMainTenantUser` / `updateMainTenantUser` / `deleteMainTenantUser`
 
-Keep schema grouped by module; do not put all business logic in resolvers. Resolvers should call domain services.
+Keep one GraphQL SDL + resolvers map; do not put business logic in resolvers. Resolvers should call domain services under `src/modules/*`.
 
 ## Authorization approach
 
@@ -225,7 +238,7 @@ Revisit schema-per-tenant or DB-per-tenant only if compliance/contracts require 
 
 | Concern | Approach |
 | --- | --- |
-| Validation | Shared Zod schemas at API boundary |
+| Validation | Shared Zod schemas at service boundary |
 | Errors | Typed GraphQL errors (`UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `VALIDATION`) |
 | Audit | Write on every privileged mutation |
 | Logging | Request id + user id + tenant id on server logs |
@@ -238,7 +251,7 @@ Revisit schema-per-tenant or DB-per-tenant only if compliance/contracts require 
 2. **Two console roles only** — extend later if needed
 3. **One main tenant** — no multi-reseller hierarchy yet
 4. **Shared DB + tenantId** isolation
-5. **GraphQL as the only client API** for admin/tenant apps
+5. **GraphQL as the only client contract** for admin/tenant apps
 6. **UI authorization is cosmetic; server authorization is mandatory**
 
 ## What not to do yet

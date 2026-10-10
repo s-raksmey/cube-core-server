@@ -14,6 +14,7 @@ import {
 import { forbidden, unauthenticated } from "@/src/lib/errors";
 import {
   findAccountByUuid,
+  assertConsoleAuthorization,
   type LoadedAccount,
 } from "@/src/modules/users/account";
 
@@ -136,12 +137,31 @@ export async function resolveSessionFromAccessToken(token: string) {
     where: { uuid: payload.sessionId },
   });
 
-  if (!session || session.revokedAt || session.expiresAt < new Date()) {
+  if (
+    !session ||
+    session.revokedAt ||
+    session.expiresAt < new Date() ||
+    session.userUuid !== payload.userId ||
+    session.tenantUuid !== payload.tenantId ||
+    session.audience !== payload.audience
+  ) {
     throw unauthenticated();
   }
 
   const account = await findAccountByUuid(payload.userId, payload.tenantId);
-  if (!account) throw unauthenticated();
+  if (
+    !account ||
+    account.status !== UserStatus.ACTIVE ||
+    account.roleCode !== payload.role
+  ) {
+    throw unauthenticated();
+  }
+
+  if (account.tenant.status === TenantStatus.SUSPENDED) {
+    throw forbidden("Tenant is suspended");
+  }
+
+  assertConsoleAuthorization(account, payload.audience);
 
   if (
     account.sessionsRevokedAt &&

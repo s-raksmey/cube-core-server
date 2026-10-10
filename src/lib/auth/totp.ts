@@ -1,4 +1,4 @@
-import { generateSecret, generate, verify } from "otplib";
+import { generateSecret, verify } from "otplib";
 import QRCode from "qrcode";
 
 const TOTP_DEFAULTS = {
@@ -50,16 +50,6 @@ export async function verifyTotpCode(secret: string, code: string): Promise<bool
   });
 
   return result.valid === true;
-}
-
-/** Returns the current expected code for diagnostics / tests only. */
-export async function currentTotpCode(secret: string): Promise<string> {
-  return generate({
-    secret: secret.replace(/\s+/g, "").toUpperCase(),
-    algorithm: TOTP_DEFAULTS.algorithm,
-    digits: TOTP_DEFAULTS.digits,
-    period: TOTP_DEFAULTS.period,
-  });
 }
 
 export async function totpTimeStep(

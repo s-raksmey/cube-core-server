@@ -5,7 +5,7 @@ import {
   type AuthAudience,
 } from "@prisma/client";
 import { prisma } from "@/src/lib/db";
-import { forbidden, unauthenticated, validationError } from "@/src/lib/errors";
+import { forbidden, validationError } from "@/src/lib/errors";
 
 export type LoadedAccount = {
   uuid: string;
@@ -127,49 +127,6 @@ export async function findAccountByUuid(
   return loadFromMembership(userUuid, tenantUuid);
 }
 
-export async function findMainTenantMembership(
-  userUuid: string,
-): Promise<LoadedAccount | null> {
-  const membership = await prisma.tenantMembership.findFirst({
-    where: {
-      userUuid,
-      status: MembershipStatus.ACTIVE,
-      tenant: { type: TenantType.MAIN },
-      role: { code: "SUPERADMIN" },
-    },
-    include: {
-      user: { include: { twoFactorAuth: true } },
-      role: true,
-      tenant: true,
-    },
-  });
-  if (!membership) return null;
-  const { user, role, tenant } = membership;
-  return {
-    uuid: user.uuid,
-    email: user.email,
-    username: user.username,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    fullName: displayFullName(user),
-    passwordHash: user.passwordHash,
-    status: user.status,
-    tenantUuid: tenant.uuid,
-    roleCode: role.code,
-    membershipUuid: membership.uuid,
-    totpSecretEnc: user.twoFactorAuth?.encryptedSecret ?? null,
-    totpEnabledAt: user.twoFactorAuth?.enabledAt ?? null,
-    sessionsRevokedAt: user.sessionsRevokedAt,
-    tenant: {
-      uuid: tenant.uuid,
-      name: tenant.name,
-      slug: tenant.slug,
-      type: tenant.type,
-      status: tenant.status,
-    },
-  };
-}
-
 export function assertConsoleAuthorization(
   account: LoadedAccount,
   audience: AuthAudience,
@@ -194,13 +151,6 @@ export function assertConsoleAuthorization(
   if (account.roleCode !== "SUPERADMIN" || account.tenant.type !== TenantType.MAIN) {
     throw forbidden("Only SuperAdmin can access the main console");
   }
-}
-
-export function requireActiveAccount(account: LoadedAccount | null) {
-  if (!account || account.status !== UserStatus.ACTIVE) {
-    throw unauthenticated("Invalid email or password");
-  }
-  return account;
 }
 
 export async function getRoleUuid(code: "SUPERADMIN" | "ADMIN" | "EDITOR" | "AUTHOR") {

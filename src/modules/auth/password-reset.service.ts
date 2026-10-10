@@ -242,7 +242,3 @@ export async function completePasswordReset(input: {
 
   return { success: true as const };
 }
-
-export const generatePasswordResetLinkBody = z.object({
-  userId: z.string().uuid(),
-});

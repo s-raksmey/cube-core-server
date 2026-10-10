@@ -39,35 +39,43 @@ docker compose up -d
 
 Host DB port is **5434** (avoids clashes with other local Postgres installs).
 
-## 2. Install `cube-core-server` packages
+## 2. Install and configure `cube-core-server`
 
 From `C:\personal\cube-core-server`:
 
-```bash
-npm install graphql graphql-yoga zod @prisma/client bcryptjs jose
-npm install -D prisma tsx @types/bcryptjs
-npx prisma init
+```powershell
+npm ci
 ```
 
 Create `.env`:
 
 ```env
-DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@127.0.0.1:5432/cube-db?schema=public"
+DATABASE_URL="postgresql://cube:cube@127.0.0.1:5434/cube_core?schema=public"
 AUTH_SECRET="replace-with-long-random-string"
-APP_URL="http://localhost:4000"
-ADMIN_APP_URL="http://localhost:3001"
-TENANT_APP_URL="http://localhost:3002"
+ADMIN_APP_URL="http://localhost:3000"
+TENANT_APP_URL="http://localhost:3001"
+WEBSITE_URL="http://localhost:3002"
 ```
 
-Dev script ports (set when configuring scripts):
+Dev (GraphQL-only Node server on port **4000**):
 
 ```bash
-next dev --port 4000
+npm run dev
 ```
+
+The GraphQL endpoint is `http://localhost:4000/graphql`. The server exposes no Next.js pages or REST `/auth` or `/api` handlers.
 
 ## 3. `cube-core-admin` (main tenant console)
 
-Already installed: Apollo Client, Zod, **shadcn/ui** (Nova / Radix).
+Already installed: Apollo Client, Zod, **shadcn/ui** (Nova / Radix), GraphQL Codegen.
+
+Admin uses the Next.js `src/` layout. Operations live in `src/graphql/*.gql`. After the **server GraphQL SDL** changes (`cube-core-server/src/graphql/schema.graphql`), regenerate admin Apollo types:
+
+```bash
+npm run graphql:codegen
+```
+
+(Prisma migrations update the database; codegen updates TypeScript from the GraphQL schema — run codegen whenever the SDL or admin `.gql` operations change.)
 
 ```bash
 # add more UI pieces as needed
@@ -77,20 +85,20 @@ npx shadcn@latest add dialog dropdown-menu table
 `.env.local`:
 
 ```env
-NEXT_PUBLIC_GRAPHQL_URL="http://localhost:4000/api/graphql"
+GRAPHQL_SERVER_URL="http://localhost:4000/graphql"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
 
-Dev: `npm run dev` → port **3000**
+Dev: `npm run dev` → port **3000**. Apollo calls same-origin `/graphql` (rewritten to the server).
 
 ## 4. `cube-core-tenant` (sub-tenant app)
 
-Already installed: Apollo Client, Zod, **shadcn/ui** (same preset as admin).
+Already installed: Apollo Client, Zod, **shadcn/ui** (same preset as admin). Uses Next.js `src/` layout (`src/app`, `src/components`, `src/lib`).
 
 `.env.local`:
 
 ```env
-NEXT_PUBLIC_GRAPHQL_URL="http://localhost:4000/api/graphql"
+GRAPHQL_SERVER_URL="http://localhost:4000/graphql"
 NEXT_PUBLIC_APP_URL="http://localhost:3001"
 ```
 
@@ -98,7 +106,7 @@ Dev: `npm run dev` → port **3001**
 
 ## 5. `cube-core-website` (public site)
 
-Already installed: **shadcn/ui** (same preset). No GraphQL in v1.
+Already installed: **shadcn/ui** (same preset). Uses Next.js `src/` layout. No GraphQL in v1.
 
 `.env.local`:
 
@@ -117,6 +125,8 @@ npm run db:up
 npm run dev
 
 # from cube-core-admin   → :3000
+# after server GraphQL SDL changes:
+npm run graphql:codegen
 npm run dev
 
 # from cube-core-tenant  → :3001
@@ -135,12 +145,6 @@ Seeded accounts (dev only):
 - Singleton main tenant `core-super-admin` is created by **migration** (exactly one MAIN tenant; never seeded, never created again).
 - Seed creates **only** SuperAdmin. Sub-tenants and Admins are created later through the product.
 
-## 7. Next implementation work
-
-1. Add GraphQL Yoga route at `/api/graphql`
-2. Wire admin Apollo Client to that endpoint
-3. Implement login + role/tenant guards
-
 ## Do not install
 
 - drizzle / drizzle-orm
@@ -148,5 +152,4 @@ Seeded accounts (dev only):
 - urql
 - graphql-request (as primary client)
 - pothos / type-graphql
-- argon2
 - redis (v1)

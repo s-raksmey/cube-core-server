@@ -20,13 +20,12 @@ When building any feature, **read those docs + existing code first**. Do not inv
 
 - Domain logic lives in **server** `src/modules/*` services.
 - Resolvers stay thin — call services, never put business rules only in UI.
-- Frontends use BFF `app/api/*` + cookies; never store secrets in localStorage.
+- Admin: Apollo → `/graphql` rewrite + HttpOnly cookies via Server Actions; never localStorage tokens.
 
 ## Locked stack (do not swap)
 
-- Next.js App Router + TypeScript + Zod
-- Server: PostgreSQL, Prisma 6, GraphQL Yoga + SDL (`src/graphql/schema.graphql`), jose cookies, Argon2id/bcrypt verify
-- Frontends: Tailwind + **shadcn/ui** + Apollo Client (admin/tenant)
+- Server: Node HTTP + TypeScript + Zod + PostgreSQL + Prisma 6 + GraphQL Yoga + SDL (`src/graphql/schema.graphql`), jose cookies, Argon2id/bcrypt verify
+- Frontends: Next.js App Router + Tailwind + **shadcn/ui** + Apollo Client (admin/tenant)
 - No Nest, tRPC, Redux, alternate UI kits, or microservices for v1
 
 ## Tenancy & roles (hard)
@@ -48,7 +47,7 @@ SUB tenants (children of MAIN)
 
 ## Auth pattern (reuse, do not duplicate)
 
-1. Password (username **or** email) → short-lived challenge (no API access)
+1. Password (username **or** email) → short-lived challenge (no protected session)
 2. Activation: username + password + mandatory TOTP + recovery codes (shown once)
 3. Returning login: TOTP verify (recovery-code path available)
 4. Then issue console-specific session
@@ -58,13 +57,16 @@ Password reset: **SuperAdmin-generated links only** (no public forgot-password).
 ## Server layout
 
 ```text
-src/modules/{auth,tenants,users,dashboard}/   # domain services
-src/graphql/{schema.graphql,resolvers.ts,context.ts}
+src/index.ts                                    # Node HTTP + Yoga → /graphql only
+src/modules/{auth,tenants,users,dashboard}/     # domain services
+src/graphql/schema.graphql                      # single SDL
+src/graphql/resolvers/{auth,dashboard,tenants,users}/  # one op per *-resolver.ts
 src/lib/{db,auth,errors}
 prisma/schema.prisma
-app/api/{graphql,auth,admin}/…
 ```
 
+- Server is **GraphQL-only** — no Next.js `app/`, no REST `/auth` or `/api`.
+- One SDL; resolvers split by domain folder (not one giant `resolvers.ts`). Business logic stays in `src/modules/*`.
 - Validate inputs with Zod in services.
 - Write `audit_logs` on privileged mutations.
 - Prefer unified `users` / memberships / sessions over inventing parallel auth tables.
@@ -75,7 +77,8 @@ app/api/{graphql,auth,admin}/…
 - Admin User Management manages **MAIN SUPERADMIN memberships only**
 - Sub-tenant user invites: activation links (`createAdminUser` / tenant Users page)
 - Tenant app: strictly one sub-tenant scope; reject SuperAdmin at login
-- Use existing `components/ui` (shadcn), dashboard shells, GraphQL operations in `lib/graphql/`
+- Admin / tenant / website use Next.js `src/` layout (`src/app`, `src/components`, `src/lib`, …)
+- Admin GraphQL docs: `src/graphql/*.gql` + `src/lib/apollo`; run `npm run graphql:codegen` after server SDL changes
 
 ## Feature checklist (before claiming done)
 

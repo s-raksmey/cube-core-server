@@ -171,6 +171,46 @@ type SubTenantPage {
   pageSize: Int!
 }
 
+type ActivationValidatePayload {
+  valid: Boolean!
+  expiresAt: String!
+  email: String!
+  firstName: String
+  lastName: String
+  needsActivation: Boolean!
+}
+
+type ActivationCredentialsPayload {
+  nextStep: AuthNextStep!
+  challengeToken: String!
+  qrCodeDataUrl: String
+  manualEntryKey: String
+  email: String!
+  username: String!
+  activationToken: String!
+}
+
+type ActivationCompletePayload {
+  success: Boolean!
+  recoveryCodes: [String!]!
+  user: User!
+}
+
+type PasswordResetValidatePayload {
+  valid: Boolean!
+  expiresAt: String!
+}
+
+type PasswordResetCompletePayload {
+  success: Boolean!
+}
+
+type RefreshSessionPayload {
+  accessToken: String!
+  audience: LoginAudience!
+  user: User!
+}
+
 type Query {
   me: User
   platformDashboard: PlatformDashboard!
@@ -179,6 +219,8 @@ type Query {
   mainTenantUsers(search: String, page: Int, pageSize: Int): MainTenantUserPage!
   mainTenantUser(id: ID!): User!
   tenantUsers(search: String, page: Int, pageSize: Int): TenantUserPage!
+  validateActivationToken(token: String!): ActivationValidatePayload!
+  validatePasswordResetToken(token: String!): PasswordResetValidatePayload!
 }
 
 type Mutation {
@@ -189,6 +231,30 @@ type Mutation {
   ): LoginResult!
   verifyLoginTotp(challengeToken: String!, code: String!): AuthPayload!
   verifyTotpEnrollment(challengeToken: String!, code: String!): AuthPayload!
+  verifyRecoveryCode(challengeToken: String!, code: String!): AuthPayload!
+  refreshSession(
+    refreshToken: String!
+    audience: LoginAudience!
+  ): RefreshSessionPayload!
+  completeActivation(
+    token: String!
+    username: String!
+    password: String!
+    confirmPassword: String!
+  ): ActivationCredentialsPayload!
+  completeActivationTotp(
+    challengeToken: String!
+    code: String!
+    activationToken: String!
+  ): ActivationCompletePayload!
+  completePasswordReset(
+    token: String!
+    firstName: String
+    lastName: String
+    fullName: String
+    password: String!
+    confirmPassword: String!
+  ): PasswordResetCompletePayload!
   generatePasswordResetLink(userId: ID!): PasswordResetLinkPayload!
   generateMainTenantUserPasswordResetLink(userId: ID!): PasswordResetLinkPayload!
   generateMainTenantUserActivationLink(userId: ID!): ActivationLinkPayload!

@@ -1,9 +1,7 @@
-<!-- BEGIN:nextjs-agent-rules -->
+# Cube Core Server
 
-## This is NOT the Next.js you know
+GraphQL-only Node service (Yoga on `/graphql`). Domain logic lives in `src/modules/*`.
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+Canonical docs: `docs/ARCHITECTURE.md`, `docs/ROLES-AND-TENANCY.md`, `docs/TECH-STACK.md`, `docs/AUTH-2FA.md`.
 
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+Do **not** add Next.js `app/` routes or REST `/auth` / `/api` handlers — expose operations through GraphQL SDL + resolvers only.
