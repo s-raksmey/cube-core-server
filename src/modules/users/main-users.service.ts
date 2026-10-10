@@ -90,14 +90,14 @@ async function mapMainRow(userUuid: string) {
   const account = await findAccountByUuid(userUuid);
   if (!account) throw validationError("User not found");
   const mapped = mapAuthUser(account);
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { uuid: userUuid },
+    select: { createdAt: true, lastLoginAt: true },
+  });
   return {
     ...mapped,
-    createdAt: (
-      await prisma.user.findUniqueOrThrow({ where: { uuid: userUuid } })
-    ).createdAt.toISOString(),
-    lastLoginAt: (
-      await prisma.user.findUniqueOrThrow({ where: { uuid: userUuid } })
-    ).lastLoginAt?.toISOString() ?? null,
+    createdAt: user.createdAt.toISOString(),
+    lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
     totpEnabled: Boolean(account.totpEnabledAt),
   };
 }
@@ -139,7 +139,30 @@ export async function listMainTenantUsers(
   const [rows, total] = await Promise.all([
     prisma.tenantMembership.findMany({
       where,
-      include: { user: true },
+      select: {
+        user: {
+          select: {
+            uuid: true,
+            email: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+            status: true,
+            createdAt: true,
+            lastLoginAt: true,
+            twoFactorAuth: { select: { enabledAt: true } },
+          },
+        },
+        tenant: {
+          select: {
+            uuid: true,
+            name: true,
+            slug: true,
+            type: true,
+            status: true,
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
       skip: (parsed.data.page - 1) * parsed.data.pageSize,
       take: parsed.data.pageSize,
@@ -147,7 +170,30 @@ export async function listMainTenantUsers(
     prisma.tenantMembership.count({ where }),
   ]);
 
-  const items = await Promise.all(rows.map((r) => mapMainRow(r.userUuid)));
+  const items = rows.map(({ user, tenant }) => ({
+    id: user.uuid,
+    uuid: user.uuid,
+    email: user.email,
+    username: user.username,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    fullName: displayFullName(user),
+    type: "MAIN" as const,
+    role: "SUPERADMIN",
+    status: user.status,
+    tenantId: tenant.uuid,
+    tenant: {
+      id: tenant.uuid,
+      uuid: tenant.uuid,
+      name: tenant.name,
+      slug: tenant.slug,
+      type: tenant.type,
+      status: tenant.status,
+    },
+    createdAt: user.createdAt.toISOString(),
+    lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+    totpEnabled: Boolean(user.twoFactorAuth?.enabledAt),
+  }));
   return {
     items,
     total,
@@ -186,7 +232,7 @@ export async function createMainTenantUser(
   const exists = await prisma.user.findUnique({ where: { email } });
   if (exists) throw validationError("Email already in use");
 
-  const user = await prisma.$transaction(async (tx) => {
+  const { user, activation } = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
         email,
@@ -205,21 +251,22 @@ export async function createMainTenantUser(
         createdByUuid: session.userId,
       },
     });
-    return created;
-  });
-
-  const activation = await createActivationToken({
-    userUuid: user.uuid,
-    createdByUuid: session.userId,
-  });
-
-  await writeAuthAudit({
-    action: "MAIN_USER_CREATED",
-    actorUserUuid: session.userId,
-    tenantUuid: session.tenantId,
-    targetType: "user",
-    targetUuid: user.uuid,
-    metadata: { email: user.email, role: "SUPERADMIN" },
+    const activationLink = await createActivationToken(
+      { userUuid: created.uuid, createdByUuid: session.userId },
+      tx,
+    );
+    await writeAuthAudit(
+      {
+        action: "MAIN_USER_CREATED",
+        actorUserUuid: session.userId,
+        tenantUuid: session.tenantId,
+        targetType: "user",
+        targetUuid: created.uuid,
+        metadata: { email: created.email, role: "SUPERADMIN" },
+      },
+      tx,
+    );
+    return { user: created, activation: activationLink };
   });
 
   return {

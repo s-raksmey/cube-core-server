@@ -1,7 +1,10 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/src/lib/db";
 
-export async function writeAuthAudit(input: {
+type AuditClient = Pick<Prisma.TransactionClient, "auditLog">;
+
+export async function writeAuthAudit(
+  input: {
   action: string;
   actorUserUuid?: string | null;
   tenantUuid?: string | null;
@@ -9,8 +12,10 @@ export async function writeAuthAudit(input: {
   targetUuid?: string | null;
   correlationId?: string;
   metadata?: Prisma.InputJsonValue;
-}) {
-  await prisma.auditLog.create({
+  },
+  client: AuditClient = prisma,
+) {
+  await client.auditLog.create({
     data: {
       actorUserUuid: input.actorUserUuid ?? null,
       tenantUuid: input.tenantUuid ?? null,

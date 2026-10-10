@@ -16,7 +16,7 @@ When the user asks you to **do / build / set up / add / implement / fix / change
    - `cube-core-tenant` — sub-tenant product app
    - `cube-core-website` — marketing only
 3. **Follow architecture rule** `.cursor/rules/cube-core-architecture.mdc` and docs `TECH-STACK.md`, `ARCHITECTURE.md`, `SETUP.md`, `AUTH-2FA.md`.
-4. **Follow roles/tenancy** in `docs/ROLES-AND-TENANCY.md` (SuperAdmin cannot log into sub-tenants; singleton main tenant `core-super-admin`; unified `users` + `tenant_memberships`; sub-tenant roles Admin + Editor + Author).
+4. **Follow roles/tenancy** in `docs/ROLES-AND-TENANCY.md` (SuperAdmin cannot log into sub-tenants; singleton main tenant `core-super-admin`; unified `users` + `tenant_memberships`; sub-tenant roles Admin + Editor only).
 5. **Update docs** in `cube-core-server/docs/` whenever behavior, roles, features, stack, or architecture change. Keep ROADMAP checkboxes honest.
 6. **Reuse existing patterns** — Prisma models, modules under `src/`, GraphQL Yoga + SDL, Zod, jose cookies, Apollo on admin/tenant, **shadcn/ui** on admin/tenant/website. Do not invent alternate stacks or UI kits.
 7. **Afterward** — briefly say what changed, where, and what to verify.

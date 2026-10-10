@@ -35,7 +35,7 @@ MAIN tenant (slug: core-super-admin, singleton)
   └── users + tenant_memberships → SUPERADMIN only
 
 SUB tenants (children of MAIN)
-  └── users + tenant_memberships → ADMIN | EDITOR | AUTHOR
+  └── users + tenant_memberships → ADMIN | EDITOR
 ```
 
 - Unified identity: `users`, `roles`, `tenant_memberships` (not MainUser/SubUser).
@@ -89,3 +89,12 @@ prisma/schema.prisma
 3. SDL + resolvers + service (not UI-only filtering)
 4. Docs updated if behavior/architecture/roles changed
 5. Reused patterns; no alternate stack
+
+## GraphQL field selection and efficient reads
+
+- GraphQL operation documents request only fields their screen/action uses; avoid broad “just in case” selections.
+- GraphQL limits response fields, but does not automatically limit database reads. Use explicit Prisma `select` projections in read services; avoid full-model `include: true` on list paths.
+- Never load password hashes, TOTP secrets, recovery codes, or other credentials for display/list queries. For 2FA display, select only `enabledAt`.
+- Keep authorization, tenant scope, filtering, ordering, and bounded pagination server-side regardless of selection. Omitted fields are not authorization.
+- Use purpose-specific typed reads for materially different projections; avoid generic selection reflection that weakens type or tenant safeguards.
+- Follow `docs/ARCHITECTURE.md` → “GraphQL field selection and data efficiency”.

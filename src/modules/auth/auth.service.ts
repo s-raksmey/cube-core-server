@@ -1,5 +1,6 @@
 import { TenantStatus, UserStatus } from "@prisma/client";
 import type { AuthAudience } from "@prisma/client";
+import { z } from "zod";
 import { verifyPassword } from "@/src/lib/auth/password";
 import { unauthenticated } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
@@ -25,6 +26,12 @@ import {
 
 export type LoginAudience = AuthAudience;
 
+const loginInputSchema = z.object({
+  identifier: z.string().trim().min(1).max(254),
+  password: z.string().min(1).max(128),
+  audience: z.enum(["ADMIN_CONSOLE", "TENANT_APP"]),
+});
+
 export type LoginStepResult =
   | {
       status: "CHALLENGE";
@@ -47,11 +54,12 @@ export async function loginWithPassword(
   audience: LoginAudience = "ADMIN_CONSOLE",
   correlationId?: string,
 ): Promise<LoginStepResult> {
-  const normalizedId = identifier.trim().toLowerCase();
-  const normalizedPassword = password;
-  if (!normalizedId || !normalizedPassword) {
+  const parsed = loginInputSchema.safeParse({ identifier, password, audience });
+  if (!parsed.success) {
     throw unauthenticated(INVALID_PASSWORD_LOGIN_NOTICE);
   }
+  const normalizedId = parsed.data.identifier.toLowerCase();
+  const normalizedPassword = parsed.data.password;
 
   let account = await findAccountByEmailOrUsername(normalizedId);
 

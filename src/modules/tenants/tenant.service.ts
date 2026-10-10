@@ -193,7 +193,7 @@ export async function createAdminUser(
   const exists = await prisma.user.findUnique({ where: { email } });
   if (exists) throw validationError("Email already in use");
 
-  const user = await prisma.$transaction(async (tx) => {
+  const { user, activation } = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
         email,
@@ -212,26 +212,30 @@ export async function createAdminUser(
         createdByUuid: session.userId,
       },
     });
-    return created;
-  });
-
-  const activation = await createActivationToken({
-    userUuid: user.uuid,
-    createdByUuid: session.userId,
-    audience: "TENANT_APP",
-  });
-
-  await writeAuthAudit({
-    action: roleCode === "EDITOR" ? "EDITOR_CREATED" : "ADMIN_CREATED",
-    actorUserUuid: session.userId,
-    tenantUuid: session.tenantId,
-    targetType: "user",
-    targetUuid: user.uuid,
-    metadata: {
-      email: user.email,
-      role: roleCode,
-      tenantUuid: tenant.uuid,
-    },
+    const activationLink = await createActivationToken(
+      {
+        userUuid: created.uuid,
+        createdByUuid: session.userId,
+        audience: "TENANT_APP",
+      },
+      tx,
+    );
+    await writeAuthAudit(
+      {
+        action: roleCode === "EDITOR" ? "EDITOR_CREATED" : "ADMIN_CREATED",
+        actorUserUuid: session.userId,
+        tenantUuid: session.tenantId,
+        targetType: "user",
+        targetUuid: created.uuid,
+        metadata: {
+          email: created.email,
+          role: roleCode,
+          tenantUuid: tenant.uuid,
+        },
+      },
+      tx,
+    );
+    return { user: created, activation: activationLink };
   });
 
   const account = await findAccountByUuid(user.uuid, tenant.uuid);
@@ -327,10 +331,31 @@ export async function listTenantUsers(
   const [rows, total] = await Promise.all([
     prisma.tenantMembership.findMany({
       where,
-      include: {
-        user: { include: { twoFactorAuth: true } },
-        role: true,
-        tenant: true,
+      select: {
+        user: {
+          select: {
+            uuid: true,
+            email: true,
+            username: true,
+            firstName: true,
+            lastName: true,
+            status: true,
+            createdAt: true,
+            lastLoginAt: true,
+            twoFactorAuth: { select: { enabledAt: true } },
+          },
+        },
+        role: { select: { code: true } },
+        tenant: {
+          select: {
+            uuid: true,
+            name: true,
+            slug: true,
+            type: true,
+            status: true,
+            createdAt: true,
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * pageSize,

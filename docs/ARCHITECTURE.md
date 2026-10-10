@@ -205,6 +205,18 @@ Single data contract: GraphQL on the server (`/graphql` only). Admin and tenant 
 
 Keep one GraphQL SDL + resolvers map; do not put business logic in resolvers. Resolvers should call domain services under `src/modules/*`.
 
+### GraphQL field selection and data efficiency
+
+- GraphQL operations must request only the fields that the consuming screen/action uses. Avoid broad reusable selections that pull fields “just in case”; use small named fragments only when the same fields are genuinely reused.
+- GraphQL returns only selected response fields, but this alone does **not** prevent a resolver from over-fetching from PostgreSQL. Read services must use Prisma `select` projections for fields needed to construct the result; avoid `include: { relation: true }` and full-model reads on list paths.
+- Never load password hashes, TOTP secrets, recovery codes, or other credentials for display/list queries. For a boolean such as `totpEnabled`, select only the relevant `enabledAt` field.
+- Keep filtering, authorization, ordering, and pagination in the server query. Preserve tenant scoping independently of the requested projection.
+- A GraphQL field’s omission from a client operation must never be treated as authorization. Server authorization and field-level data safety remain mandatory.
+- For list screens, use bounded pagination and a small explicit projection. If a resolver serves materially different projections, use purpose-specific reads or a justified typed selection-aware projection; do not introduce generic reflection that weakens typing or tenant guards.
+- After changing SDL or operation documents, regenerate frontend types and keep generated artifacts in sync.
+
+The Main Console and tenant user list services follow this rule: they explicitly project display fields and do not fetch credential material.
+
 ## Authorization approach
 
 Put checks in one place used by all resolvers:
