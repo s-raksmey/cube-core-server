@@ -1,4 +1,4 @@
-import { AuthAudience, AuthChallengeType } from "@prisma/client";
+import { AuthAudience, AuthChallengeType, type Prisma } from "@prisma/client";
 import { prisma } from "@/src/lib/db";
 import {
   CHALLENGE_TTL_MS,
@@ -199,7 +199,6 @@ export async function beginTotpEnrollment(input: {
 }
 
 async function generateRecoveryCodes(userUuid: string) {
-  await prisma.userRecoveryCode.deleteMany({ where: { userUuid } });
   const plainCodes: string[] = [];
   const rows = [];
   for (let i = 0; i < RECOVERY_CODE_COUNT; i++) {
@@ -210,8 +209,7 @@ async function generateRecoveryCodes(userUuid: string) {
       codeHash: await hashPassword(code),
     });
   }
-  await prisma.userRecoveryCode.createMany({ data: rows });
-  return plainCodes;
+  return { plainCodes, rows };
 }
 
 export async function verifyTotpEnrollment(input: {
@@ -219,6 +217,7 @@ export async function verifyTotpEnrollment(input: {
   code: string;
   correlationId?: string;
   issueSession?: boolean;
+  onEnrollmentVerified?: (tx: Prisma.TransactionClient) => Promise<void>;
 }) {
   const { challenge, account } = await loadChallenge(input.challengeToken);
   if (challenge.type !== "TOTP_ENROLL") {
@@ -256,18 +255,32 @@ export async function verifyTotpEnrollment(input: {
   await assertTotpNotReplayed(account.uuid, secret, input.code);
   await resetFailedTotpAttempts(account.uuid);
 
-  await prisma.userTwoFactorAuth.update({
-    where: { userUuid: account.uuid },
-    data: {
-      encryptedSecret: twoFa.pendingEncryptedSecret,
-      pendingEncryptedSecret: null,
-      pendingExpiresAt: null,
-      enabledAt: new Date(),
-    },
-  });
+  const { plainCodes: recoveryCodes, rows: recoveryCodeRows } =
+    await generateRecoveryCodes(account.uuid);
+  await prisma.$transaction(async (tx) => {
+    const consumed = await tx.authLoginChallenge.updateMany({
+      where: {
+        uuid: challenge.uuid,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { consumedAt: new Date() },
+    });
+    if (consumed.count !== 1) throw unauthenticated("Challenge already used");
 
-  const recoveryCodes = await generateRecoveryCodes(account.uuid);
-  await consumeChallenge(challenge.uuid);
+    await tx.userTwoFactorAuth.update({
+      where: { userUuid: account.uuid },
+      data: {
+        encryptedSecret: twoFa.pendingEncryptedSecret,
+        pendingEncryptedSecret: null,
+        pendingExpiresAt: null,
+        enabledAt: new Date(),
+      },
+    });
+    await tx.userRecoveryCode.deleteMany({ where: { userUuid: account.uuid } });
+    await tx.userRecoveryCode.createMany({ data: recoveryCodeRows });
+    await input.onEnrollmentVerified?.(tx);
+  });
 
   await writeAuthAudit({
     action: "auth.2fa.enrollment.success",
@@ -381,12 +394,24 @@ export async function verifyRecoveryCode(input: {
     throw unauthenticated(failedAttemptNotice("totp", attempt.remaining));
   }
 
-  await prisma.userRecoveryCode.update({
-    where: { uuid: matchedId },
-    data: { usedAt: new Date() },
+  await prisma.$transaction(async (tx) => {
+    const challengeClaim = await tx.authLoginChallenge.updateMany({
+      where: {
+        uuid: challenge.uuid,
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { consumedAt: new Date() },
+    });
+    if (challengeClaim.count !== 1) throw unauthenticated("Challenge already used");
+
+    const codeClaim = await tx.userRecoveryCode.updateMany({
+      where: { uuid: matchedId!, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (codeClaim.count !== 1) throw unauthenticated("Recovery code already used");
   });
   await resetFailedTotpAttempts(account.uuid);
-  await consumeChallenge(challenge.uuid);
 
   await writeAuthAudit({
     action: "auth.2fa.recovery.success",

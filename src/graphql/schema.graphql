@@ -188,7 +188,6 @@ type ActivationCredentialsPayload {
   manualEntryKey: String
   email: String!
   username: String!
-  activationToken: String!
 }
 
 type ActivationCompletePayload {
@@ -247,7 +246,6 @@ type Mutation {
   completeActivationTotp(
     challengeToken: String!
     code: String!
-    activationToken: String!
   ): ActivationCompletePayload!
   completePasswordReset(
     token: String!

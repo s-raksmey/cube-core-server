@@ -5,8 +5,8 @@ const TOTP_DEFAULTS = {
   algorithm: "sha1" as const,
   digits: 6 as const,
   period: 30 as const,
-  /** Allow ±2 periods for phone/server clock skew. */
-  epochTolerance: 60,
+  /** Allow one period of clock skew in either direction. */
+  epochTolerance: [30, 30] as [number, number],
 };
 
 export function generateTotpSecret(): string {
@@ -58,9 +58,18 @@ export async function totpTimeStep(
 ): Promise<bigint | null> {
   const normalized = code.replace(/\s+/g, "");
   const cleanedSecret = secret.replace(/\s+/g, "").toUpperCase();
-  if (!(await verifyTotpCode(cleanedSecret, normalized))) {
+  if (!/^\d{6}$/.test(normalized)) {
     return null;
   }
-
-  return BigInt(Math.floor(Date.now() / 1000 / TOTP_DEFAULTS.period));
+  const result = await verify({
+    secret: cleanedSecret,
+    token: normalized,
+    algorithm: TOTP_DEFAULTS.algorithm,
+    digits: TOTP_DEFAULTS.digits,
+    period: TOTP_DEFAULTS.period,
+    epochTolerance: TOTP_DEFAULTS.epochTolerance,
+  });
+  return result.valid && "timeStep" in result
+    ? BigInt(result.timeStep)
+    : null;
 }

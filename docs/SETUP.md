@@ -52,6 +52,8 @@ Create `.env`:
 ```env
 DATABASE_URL="postgresql://cube:cube@127.0.0.1:5434/cube_core?schema=public"
 AUTH_SECRET="replace-with-long-random-string"
+ADMIN_AUTH_ACTION_SECRET="shared-with-cube-core-admin-only"
+TENANT_AUTH_ACTION_SECRET="different-secret-shared-with-cube-core-tenant-only"
 ADMIN_APP_URL="http://localhost:3000"
 TENANT_APP_URL="http://localhost:3001"
 WEBSITE_URL="http://localhost:3002"
@@ -87,6 +89,7 @@ npx shadcn@latest add dialog dropdown-menu table
 ```env
 GRAPHQL_SERVER_URL="http://localhost:4000/graphql"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
+ADMIN_AUTH_ACTION_SECRET="same-value-as-server-ADMIN_AUTH_ACTION_SECRET"
 ```
 
 Dev: `npm run dev` → port **3000**. Apollo calls same-origin `/graphql`.
@@ -106,6 +109,7 @@ npm run graphql:codegen
 ```env
 GRAPHQL_SERVER_URL="http://localhost:4000/graphql"
 NEXT_PUBLIC_APP_URL="http://localhost:3001"
+TENANT_AUTH_ACTION_SECRET="same-value-as-server-TENANT_AUTH_ACTION_SECRET"
 ```
 
 Dev: `npm run dev` → port **3001**

@@ -11,12 +11,12 @@ export const ACCESS_COOKIE_BY_AUDIENCE: Record<AuthAudience, string> = {
   TENANT_APP: "management_console_tenant_access",
 };
 
-export const ACCESS_TOKEN_TTL = "30s";
+export const ACCESS_TOKEN_TTL = "5m";
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Pre-auth challenge (password → 2FA). Must cover QR scan + code entry. */
-export const CHALLENGE_TTL_MS = 15 * 60 * 1000;
-/** Pending TOTP secret before first verified code. Keep ≥ CHALLENGE_TTL_MS. */
-export const TOTP_PENDING_TTL_MS = 15 * 60 * 1000;
+export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
+/** Pending TOTP secret before first verified code. Keep aligned with challenge TTL. */
+export const TOTP_PENDING_TTL_MS = CHALLENGE_TTL_MS;
 export const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000;
 /** Account activation links (SuperAdmin-provisioned). */
 export const ACTIVATION_TTL_MS = 24 * 60 * 60 * 1000;

@@ -75,7 +75,7 @@ export async function resetFailedPasswordAttempts(userUuid: string) {
 
 export async function resetFailedTotpAttempts(userUuid: string) {
   await prisma.user.updateMany({
-    where: { uuid: userUuid, status: UserStatus.ACTIVE },
+    where: { uuid: userUuid, status: { in: [UserStatus.ACTIVE, UserStatus.PENDING] } },
     data: { failedTotpAttempts: 0 },
   });
 }
@@ -84,52 +84,59 @@ export async function recordFailedAuthAttempt(
   account: LoadedAccount,
   method: FailedAuthMethod,
 ) {
-  let count: number;
-  if (method === "password") {
-    const updated = await prisma.user.update({
-      where: { uuid: account.uuid },
-      data: { failedPasswordAttempts: { increment: 1 } },
-      select: { failedPasswordAttempts: true },
-    });
-    count = updated.failedPasswordAttempts;
-  } else {
-    const updated = await prisma.user.update({
-      where: { uuid: account.uuid },
-      data: { failedTotpAttempts: { increment: 1 } },
-      select: { failedTotpAttempts: true },
-    });
-    count = updated.failedTotpAttempts;
-  }
+  const result = await prisma.$transaction(async (tx) => {
+    const updated = method === "password"
+      ? await tx.user.update({
+          where: { uuid: account.uuid },
+          data: { failedPasswordAttempts: { increment: 1 } },
+          select: { failedPasswordAttempts: true },
+        })
+      : await tx.user.update({
+          where: { uuid: account.uuid },
+          data: { failedTotpAttempts: { increment: 1 } },
+          select: { failedTotpAttempts: true },
+        });
+    const count = "failedPasswordAttempts" in updated
+      ? updated.failedPasswordAttempts
+      : updated.failedTotpAttempts;
+    if (count < MAX_ACCOUNT_AUTH_ATTEMPTS) {
+      return { count, transitionedToLocked: false, lockedUntil: null as Date | null };
+    }
 
-  const outcome = failedAttemptOutcome(count);
-  if (outcome.locked) {
     const now = new Date();
     const lockedUntil = new Date(now.getTime() + ACCOUNT_LOCKOUT_TTL_MS);
-    await prisma.$transaction([
-      prisma.user.update({
-        where: { uuid: account.uuid },
-        data: {
-          status: UserStatus.LOCKED,
-          lockedUntil,
-        },
-      }),
-      prisma.userSession.updateMany({
+    const thresholdField = method === "password"
+      ? { failedPasswordAttempts: { gte: MAX_ACCOUNT_AUTH_ATTEMPTS } }
+      : { failedTotpAttempts: { gte: MAX_ACCOUNT_AUTH_ATTEMPTS } };
+    const transition = await tx.user.updateMany({
+      where: {
+        uuid: account.uuid,
+        status: { in: [UserStatus.ACTIVE, UserStatus.PENDING] },
+        ...thresholdField,
+      },
+      data: { status: UserStatus.LOCKED, lockedUntil },
+    });
+    if (transition.count) {
+      await tx.userSession.updateMany({
         where: { userUuid: account.uuid, revokedAt: null },
         data: { revokedAt: now },
-      }),
-      prisma.authLoginChallenge.updateMany({
+      });
+      await tx.authLoginChallenge.updateMany({
         where: { userUuid: account.uuid, consumedAt: null },
         data: { consumedAt: now },
-      }),
-    ]);
+      });
+    }
+    return { count, transitionedToLocked: transition.count > 0, lockedUntil };
+  });
+
+  const outcome = failedAttemptOutcome(result.count);
+  if (result.transitionedToLocked) {
     await writeAuthAudit({
       action: "auth.account.locked",
       actorUserUuid: account.uuid,
       tenantUuid: account.tenantUuid,
-      metadata: { method, lockedUntil: lockedUntil.toISOString() },
+      metadata: { method, lockedUntil: result.lockedUntil?.toISOString() },
     });
-    return outcome;
   }
-
   return outcome;
 }

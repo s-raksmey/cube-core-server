@@ -1,14 +1,16 @@
-import { AuthAudience, UserStatus } from "@prisma/client";
+import { AuthAudience, UserStatus, type Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/src/lib/db";
 import { ACTIVATION_TTL_MS } from "@/src/lib/auth/constants";
 import { hashToken, randomToken } from "@/src/lib/auth/crypto";
+import { verifyChallengeToken } from "@/src/lib/auth/session";
 import {
   hashPassword,
   passwordPolicySchema,
 } from "@/src/lib/auth/password";
 import { unauthenticated, validationError } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
+import { clearExpiredAccountLockout } from "@/src/modules/auth/lockout.service";
 import { beginTotpEnrollment, verifyTotpEnrollment } from "@/src/modules/auth/totp.service";
 import { displayFullName, findAccountByUuid } from "@/src/modules/users/account";
 
@@ -31,10 +33,22 @@ const credentialsSchema = z.object({
 
 async function loadValidActivationToken(token: string) {
   const tokenHash = hashToken(token);
-  const row = await prisma.userActivationToken.findUnique({
+  let row = await prisma.userActivationToken.findUnique({
     where: { tokenHash },
     include: { user: true },
   });
+
+  if (
+    row?.user.status === UserStatus.LOCKED &&
+    row.user.lockedUntil &&
+    row.user.lockedUntil <= new Date()
+  ) {
+    await clearExpiredAccountLockout(row.userUuid);
+    row = await prisma.userActivationToken.findUnique({
+      where: { tokenHash },
+      include: { user: true },
+    });
+  }
 
   if (
     !row ||
@@ -186,7 +200,6 @@ export async function completeActivationCredentials(input: {
     manualEntryKey: enrollment.manualEntryKey,
     email: account.email,
     username,
-    activationToken: parsed.data.token,
   };
 }
 
@@ -194,44 +207,72 @@ export async function completeActivationCredentials(input: {
 export async function completeActivationTotp(input: {
   challengeToken: string;
   code: string;
-  activationToken: string;
   correlationId?: string;
 }) {
-  const row = await loadValidActivationToken(input.activationToken);
+  let challengePayload;
+  try {
+    challengePayload = await verifyChallengeToken(input.challengeToken);
+  } catch {
+    throw unauthenticated("Enrollment expired. Start activation again.");
+  }
+  if (
+    challengePayload.type !== "TOTP_ENROLL" ||
+    challengePayload.audience !== AuthAudience.ADMIN_CONSOLE
+  ) {
+    throw unauthenticated("Invalid activation challenge");
+  }
+  const row = await prisma.userActivationToken.findFirst({
+    where: {
+      userUuid: challengePayload.userId,
+      usedAt: null,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+      user: { deletedAt: null, status: UserStatus.PENDING },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!row) throw unauthenticated("Invalid or expired activation link");
 
   const result = await verifyTotpEnrollment({
     challengeToken: input.challengeToken,
     code: input.code,
     correlationId: input.correlationId,
     issueSession: false,
-  });
+    onEnrollmentVerified: async (tx: Prisma.TransactionClient) => {
+      const now = new Date();
+      const mark = await tx.userActivationToken.updateMany({
+        where: {
+          uuid: row.uuid,
+          usedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { usedAt: now },
+      });
+      if (mark.count !== 1) throw unauthenticated("Activation link already used");
 
-  await prisma.$transaction(async (tx) => {
-    const mark = await tx.userActivationToken.updateMany({
-      where: { uuid: row.uuid, usedAt: null, revokedAt: null },
-      data: { usedAt: new Date() },
-    });
-    if (mark.count !== 1) {
-      throw unauthenticated("Activation link already used");
-    }
+      const activated = await tx.user.updateMany({
+        where: {
+          uuid: row.userUuid,
+          status: UserStatus.PENDING,
+          activatedAt: null,
+        },
+        data: { status: UserStatus.ACTIVE, activatedAt: now },
+      });
+      if (activated.count !== 1) {
+        throw unauthenticated("Account activation is no longer available");
+      }
 
-    await tx.user.update({
-      where: { uuid: row.userUuid },
-      data: {
-        status: UserStatus.ACTIVE,
-        activatedAt: new Date(),
-      },
-    });
-
-    await tx.userActivationToken.updateMany({
-      where: {
-        userUuid: row.userUuid,
-        usedAt: null,
-        revokedAt: null,
-        uuid: { not: row.uuid },
-      },
-      data: { revokedAt: new Date() },
-    });
+      await tx.userActivationToken.updateMany({
+        where: {
+          userUuid: row.userUuid,
+          usedAt: null,
+          revokedAt: null,
+          uuid: { not: row.uuid },
+        },
+        data: { revokedAt: now },
+      });
+    },
   });
 
   await writeAuthAudit({

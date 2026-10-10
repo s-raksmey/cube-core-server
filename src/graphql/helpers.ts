@@ -1,11 +1,32 @@
 import type { GraphQLContext } from "@/src/graphql/context";
-import { unauthenticated } from "@/src/lib/errors";
+import type { AuthAudience } from "@prisma/client";
+import { forbidden, unauthenticated } from "@/src/lib/errors";
+import { verifyChallengeToken } from "@/src/lib/auth/session";
 
 export function requireSession(ctx: GraphQLContext) {
   if (!ctx.session) {
     throw unauthenticated();
   }
   return ctx.session;
+}
+
+export function requireTrustedAuthAction(ctx: GraphQLContext, audience: AuthAudience) {
+  if (ctx.trustedAuthAudience !== audience) {
+    throw forbidden("This authentication operation is available only to the trusted application server");
+  }
+}
+
+export async function requireTrustedChallengeAction(
+  ctx: GraphQLContext,
+  challengeToken: string,
+) {
+  let challenge;
+  try {
+    challenge = await verifyChallengeToken(challengeToken);
+  } catch {
+    throw unauthenticated("Sign-in challenge expired. Please sign in again.");
+  }
+  requireTrustedAuthAction(ctx, challenge.audience);
 }
 
 export function toIso(value: Date | string) {

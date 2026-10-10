@@ -61,8 +61,14 @@ async function requireSuperAdmin(session: SessionPayload) {
   if (session.role !== "SUPERADMIN") throw forbidden("SuperAdmin only");
 }
 
-async function countActiveSuperAdmins() {
-  return prisma.tenantMembership.count({
+async function lockSuperAdminRoster(tx: Prisma.TransactionClient) {
+  // Serialize roster-removal checks so two concurrent requests cannot both
+  // observe themselves as leaving one usable account behind.
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(1129665109, 1)`;
+}
+
+async function countActiveSuperAdmins(client: typeof prisma | Prisma.TransactionClient = prisma) {
+  return client.tenantMembership.count({
     where: {
       status: MembershipStatus.ACTIVE,
       role: { code: "SUPERADMIN" },
@@ -240,15 +246,8 @@ export async function updateMainTenantUser(
     throw validationError("User not found");
   }
 
-  if (parsed.data.status && parsed.data.status !== UserStatus.ACTIVE) {
-    assertCanRemoveLastActiveSuperAdmin({
-      targetUserId: existing.uuid,
-      actorUserId: session.userId,
-      targetStatus: existing.status,
-      nextStatus: parsed.data.status,
-      activeSuperAdminCount: await countActiveSuperAdmins(),
-    });
-  }
+  const changesRemoveAvailability =
+    parsed.data.status !== undefined && parsed.data.status !== UserStatus.ACTIVE;
 
   if (parsed.data.email) {
     const email = parsed.data.email.toLowerCase();
@@ -258,9 +257,7 @@ export async function updateMainTenantUser(
     }
   }
 
-  await prisma.user.update({
-    where: { uuid: existing.uuid },
-    data: {
+  const updateData = {
       ...(parsed.data.firstName !== undefined
         ? { firstName: parsed.data.firstName }
         : {}),
@@ -282,8 +279,28 @@ export async function updateMainTenantUser(
       existing.status !== UserStatus.LOCKED
         ? { lockedUntil: null }
         : {}),
-    },
-  });
+    };
+
+  if (changesRemoveAvailability) {
+    await prisma.$transaction(async (tx) => {
+      await lockSuperAdminRoster(tx);
+      const current = await tx.user.findUnique({
+        where: { uuid: existing.uuid },
+        select: { status: true },
+      });
+      if (!current) throw validationError("User not found");
+      assertCanRemoveLastActiveSuperAdmin({
+        targetUserId: existing.uuid,
+        actorUserId: session.userId,
+        targetStatus: current.status,
+        nextStatus: parsed.data.status,
+        activeSuperAdminCount: await countActiveSuperAdmins(tx),
+      });
+      await tx.user.update({ where: { uuid: existing.uuid }, data: updateData });
+    });
+  } else {
+    await prisma.user.update({ where: { uuid: existing.uuid }, data: updateData });
+  }
 
   if (
     parsed.data.status !== undefined &&
@@ -327,28 +344,40 @@ export async function deleteMainTenantUser(
     throw validationError("User not found");
   }
 
-  assertCanRemoveLastActiveSuperAdmin({
-    targetUserId: existing.uuid,
-    actorUserId: session.userId,
-    targetStatus: existing.status,
-    activeSuperAdminCount: await countActiveSuperAdmins(),
-  });
-
-  await prisma.user.update({
-    where: { uuid: existing.uuid },
-    data: {
-      status: UserStatus.DISABLED,
-      deletedAt: new Date(),
-    },
-  });
-  await revokeAllUserSessions(existing.uuid);
-  await prisma.userActivationToken.updateMany({
-    where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
-    data: { revokedAt: new Date() },
-  });
-  await prisma.userPasswordResetToken.updateMany({
-    where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
-    data: { revokedAt: new Date() },
+  await prisma.$transaction(async (tx) => {
+    await lockSuperAdminRoster(tx);
+    const current = await tx.user.findUnique({
+      where: { uuid: existing.uuid },
+      select: { status: true },
+    });
+    if (!current) throw validationError("User not found");
+    assertCanRemoveLastActiveSuperAdmin({
+      targetUserId: existing.uuid,
+      actorUserId: session.userId,
+      targetStatus: current.status,
+      activeSuperAdminCount: await countActiveSuperAdmins(tx),
+    });
+    const now = new Date();
+    await tx.user.update({
+      where: { uuid: existing.uuid },
+      data: {
+        status: UserStatus.DISABLED,
+        deletedAt: now,
+        sessionsRevokedAt: now,
+      },
+    });
+    await tx.userSession.updateMany({
+      where: { userUuid: existing.uuid, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    await tx.userActivationToken.updateMany({
+      where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
+      data: { revokedAt: now },
+    });
+    await tx.userPasswordResetToken.updateMany({
+      where: { userUuid: existing.uuid, usedAt: null, revokedAt: null },
+      data: { revokedAt: now },
+    });
   });
 
   await writeAuthAudit({
