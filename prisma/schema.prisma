@@ -17,67 +17,242 @@ enum TenantStatus {
   SUSPENDED
 }
 
-enum UserRole {
-  SUPERADMIN
-  ADMIN
-  EDITOR
-}
-
 enum UserStatus {
+  PENDING
   ACTIVE
   DISABLED
 }
 
-model Tenant {
-  id             String       @id @default(uuid())
-  type           TenantType
-  parentTenantId String?
-  parentTenant   Tenant?      @relation("TenantHierarchy", fields: [parentTenantId], references: [id])
-  childTenants   Tenant[]     @relation("TenantHierarchy")
-  name           String
-  slug           String       @unique
-  status         TenantStatus @default(ACTIVE)
-  settings       Json         @default("{}")
-  users          User[]
-  auditLogsAsActor  AuditLog[] @relation("AuditActorTenant")
-  auditLogsAsTarget AuditLog[] @relation("AuditTargetTenant")
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+enum MembershipStatus {
+  ACTIVE
+  DISABLED
+}
 
-  @@index([parentTenantId])
+enum AuthAudience {
+  ADMIN_CONSOLE
+  TENANT_APP
+}
+
+enum AuthChallengeType {
+  TOTP_ENROLL
+  TOTP_VERIFY
+  RECOVERY
+}
+
+model Tenant {
+  uuid             String              @id @default(uuid()) @map("uuid")
+  name             String
+  slug             String              @unique
+  type             TenantType
+  parentTenantUuid String?             @map("parent_tenant_uuid")
+  parentTenant     Tenant?             @relation("TenantHierarchy", fields: [parentTenantUuid], references: [uuid])
+  childTenants     Tenant[]            @relation("TenantHierarchy")
+  status           TenantStatus        @default(ACTIVE)
+  settings         Json                @default("{}")
+  memberships      TenantMembership[]
+  sessions         UserSession[]
+  challenges       AuthLoginChallenge[]
+  auditLogs        AuditLog[]
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  deletedAt        DateTime?           @map("deleted_at")
+
+  @@index([parentTenantUuid])
   @@index([type, status])
+  @@map("tenants")
+}
+
+model Role {
+  uuid         String             @id @default(uuid()) @map("uuid")
+  code         String             @unique
+  name         String
+  description  String?
+  memberships  TenantMembership[]
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+
+  @@map("roles")
 }
 
 model User {
-  id           String     @id @default(uuid())
-  tenantId     String
-  tenant       Tenant     @relation(fields: [tenantId], references: [id])
-  email        String     @unique
-  passwordHash String
-  role         UserRole
-  status       UserStatus @default(ACTIVE)
-  auditLogs    AuditLog[]
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  uuid              String                   @id @default(uuid()) @map("uuid")
+  firstName         String                   @map("first_name")
+  lastName          String                   @map("last_name")
+  username          String?                  @unique
+  email             String                   @unique
+  passwordHash      String?                  @map("password_hash")
+  status            UserStatus               @default(PENDING)
+  createdByUuid     String?                  @map("created_by")
+  createdBy         User?                    @relation("UserCreatedBy", fields: [createdByUuid], references: [uuid])
+  createdUsers      User[]                   @relation("UserCreatedBy")
+  activatedAt       DateTime?                @map("activated_at")
+  lastLoginAt       DateTime?                @map("last_login_at")
+  sessionsRevokedAt DateTime?                @map("sessions_revoked_at")
+  createdAt         DateTime                 @default(now()) @map("created_at")
+  updatedAt         DateTime                 @updatedAt @map("updated_at")
+  deletedAt         DateTime?                @map("deleted_at")
 
-  @@index([tenantId])
-  @@index([role, status])
+  memberships         TenantMembership[]
+  activationTokens    UserActivationToken[]
+  passwordResetTokens UserPasswordResetToken[]
+  twoFactorAuth       UserTwoFactorAuth?
+  recoveryCodes       UserRecoveryCode[]
+  sessions            UserSession[]
+  challenges          AuthLoginChallenge[]
+  totpReplayGuards    AuthTotpReplayGuard[]
+  auditLogs           AuditLog[]             @relation("AuditActor")
+  createdActivationTokens UserActivationToken[] @relation("ActivationCreatedBy")
+  createdResetTokens  UserPasswordResetToken[] @relation("ResetCreatedBy")
+  createdMemberships  TenantMembership[]     @relation("MembershipCreatedBy")
+
+  @@index([status])
+  @@map("users")
+}
+
+model TenantMembership {
+  uuid          String           @id @default(uuid()) @map("uuid")
+  userUuid      String           @map("user_uuid")
+  user          User             @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  tenantUuid    String           @map("tenant_uuid")
+  tenant        Tenant           @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  roleUuid      String           @map("role_uuid")
+  role          Role             @relation(fields: [roleUuid], references: [uuid])
+  status        MembershipStatus @default(ACTIVE)
+  createdByUuid String?          @map("created_by")
+  createdBy     User?            @relation("MembershipCreatedBy", fields: [createdByUuid], references: [uuid])
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  @@unique([userUuid, tenantUuid])
+  @@index([tenantUuid])
+  @@index([roleUuid])
+  @@map("tenant_memberships")
+}
+
+model UserActivationToken {
+  uuid          String    @id @default(uuid()) @map("uuid")
+  userUuid      String    @map("user_uuid")
+  user          User      @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  tokenHash     String    @unique @map("token_hash")
+  expiresAt     DateTime  @map("expires_at")
+  usedAt        DateTime? @map("used_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdByUuid String    @map("created_by")
+  createdBy     User      @relation("ActivationCreatedBy", fields: [createdByUuid], references: [uuid])
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([userUuid])
+  @@index([expiresAt])
+  @@map("user_activation_tokens")
+}
+
+model UserPasswordResetToken {
+  uuid          String    @id @default(uuid()) @map("uuid")
+  userUuid      String    @map("user_uuid")
+  user          User      @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  tokenHash     String    @unique @map("token_hash")
+  expiresAt     DateTime  @map("expires_at")
+  usedAt        DateTime? @map("used_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdByUuid String    @map("created_by")
+  createdBy     User      @relation("ResetCreatedBy", fields: [createdByUuid], references: [uuid])
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([userUuid])
+  @@index([expiresAt])
+  @@map("user_password_reset_tokens")
+}
+
+model UserTwoFactorAuth {
+  uuid                   String    @id @default(uuid()) @map("uuid")
+  userUuid               String    @unique @map("user_uuid")
+  user                   User      @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  encryptedSecret        String?   @map("encrypted_secret")
+  pendingEncryptedSecret String?   @map("pending_encrypted_secret")
+  pendingExpiresAt       DateTime? @map("pending_expires_at")
+  enabledAt              DateTime? @map("enabled_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@map("user_two_factor_auth")
+}
+
+model UserRecoveryCode {
+  uuid      String    @id @default(uuid()) @map("uuid")
+  userUuid  String    @map("user_uuid")
+  user      User      @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userUuid])
+  @@map("user_recovery_codes")
+}
+
+model UserSession {
+  uuid             String       @id @default(uuid()) @map("uuid")
+  userUuid         String       @map("user_uuid")
+  user             User         @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  tenantUuid       String       @map("tenant_uuid")
+  tenant           Tenant       @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  audience         AuthAudience
+  refreshTokenHash String       @unique @map("refresh_token_hash")
+  expiresAt        DateTime     @map("expires_at")
+  revokedAt        DateTime?    @map("revoked_at")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  lastUsedAt       DateTime?    @map("last_used_at")
+
+  @@index([userUuid])
+  @@index([tenantUuid])
+  @@index([expiresAt])
+  @@map("user_sessions")
+}
+
+model AuthLoginChallenge {
+  uuid         String            @id @default(uuid()) @map("uuid")
+  userUuid     String            @map("user_uuid")
+  user         User              @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  tenantUuid   String            @map("tenant_uuid")
+  tenant       Tenant            @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  audience     AuthAudience
+  type         AuthChallengeType
+  tokenHash    String            @unique @map("token_hash")
+  expiresAt    DateTime          @map("expires_at")
+  consumedAt   DateTime?         @map("consumed_at")
+  attemptCount Int               @default(0) @map("attempt_count")
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  @@index([userUuid])
+  @@index([expiresAt])
+  @@map("auth_login_challenges")
+}
+
+model AuthTotpReplayGuard {
+  uuid      String   @id @default(uuid()) @map("uuid")
+  userUuid  String   @map("user_uuid")
+  user      User     @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  timeStep  BigInt   @map("time_step")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userUuid, timeStep])
+  @@map("auth_totp_replay_guards")
 }
 
 model AuditLog {
-  id             String   @id @default(uuid())
-  actorUserId    String?
-  actorUser      User?    @relation(fields: [actorUserId], references: [id])
-  actorTenantId  String?
-  actorTenant    Tenant?  @relation("AuditActorTenant", fields: [actorTenantId], references: [id])
-  targetTenantId String?
-  targetTenant   Tenant?  @relation("AuditTargetTenant", fields: [targetTenantId], references: [id])
-  action         String
-  metadata       Json     @default("{}")
-  createdAt      DateTime @default(now())
+  uuid          String   @id @default(uuid()) @map("uuid")
+  actorUserUuid String?  @map("actor_user_uuid")
+  actorUser     User?    @relation("AuditActor", fields: [actorUserUuid], references: [uuid])
+  tenantUuid    String?  @map("tenant_uuid")
+  tenant        Tenant?  @relation(fields: [tenantUuid], references: [uuid])
+  action        String
+  targetType    String?  @map("target_type")
+  targetUuid    String?  @map("target_uuid")
+  requestId     String?  @map("request_id")
+  metadata      Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
 
-  @@index([actorUserId])
-  @@index([actorTenantId])
-  @@index([targetTenantId])
+  @@index([actorUserUuid])
+  @@index([tenantUuid])
   @@index([createdAt])
+  @@map("audit_logs")
 }

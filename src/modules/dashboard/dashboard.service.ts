@@ -1,12 +1,13 @@
 import {
+  MembershipStatus,
   TenantStatus,
   TenantType,
-  UserRole,
   UserStatus,
 } from "@prisma/client";
 import { prisma } from "@/src/lib/db";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden } from "@/src/lib/errors";
+import { displayFullName } from "@/src/modules/users/account";
 
 function startOfMonthsAgo(months: number) {
   const date = new Date();
@@ -21,49 +22,78 @@ function monthKey(date: Date) {
 }
 
 export async function getPlatformDashboard(session: SessionPayload) {
-  if (session.role !== UserRole.SUPERADMIN) {
+  if (session.role !== "SUPERADMIN") {
     throw forbidden("Platform dashboard requires SuperAdmin");
   }
 
-  const [totalSubTenants, activeSubTenants, totalAdmins, recentTenants, auditLogs, allSubTenants] =
-    await Promise.all([
-      prisma.tenant.count({ where: { type: TenantType.SUB } }),
-      prisma.tenant.count({
-        where: { type: TenantType.SUB, status: TenantStatus.ACTIVE },
-      }),
-      prisma.user.count({ where: { role: UserRole.ADMIN } }),
-      prisma.tenant.findMany({
-        where: { type: TenantType.SUB },
-        orderBy: { createdAt: "desc" },
-        take: 8,
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          status: true,
-          createdAt: true,
-        },
-      }),
-      prisma.auditLog.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 8,
-        select: {
-          id: true,
-          action: true,
-          createdAt: true,
-          metadata: true,
-          actorUser: { select: { email: true } },
-          targetTenant: { select: { name: true, slug: true } },
-        },
-      }),
-      prisma.tenant.findMany({
-        where: {
-          type: TenantType.SUB,
-          createdAt: { gte: startOfMonthsAgo(6) },
-        },
-        select: { createdAt: true, status: true },
-      }),
-    ]);
+  const [
+    totalSubTenants,
+    activeSubTenants,
+    totalAdmins,
+    recentTenants,
+    auditLogs,
+    allSubTenants,
+    suspendedSubTenants,
+  ] = await Promise.all([
+    prisma.tenant.count({
+      where: { type: TenantType.SUB, deletedAt: null },
+    }),
+    prisma.tenant.count({
+      where: {
+        type: TenantType.SUB,
+        status: TenantStatus.ACTIVE,
+        deletedAt: null,
+      },
+    }),
+    prisma.tenantMembership.count({
+      where: {
+        status: MembershipStatus.ACTIVE,
+        role: { code: "ADMIN" },
+        tenant: { type: TenantType.SUB, deletedAt: null },
+        user: { deletedAt: null },
+      },
+    }),
+    prisma.tenant.findMany({
+      where: { type: TenantType.SUB, deletedAt: null },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: {
+        uuid: true,
+        name: true,
+        slug: true,
+        type: true,
+        status: true,
+        createdAt: true,
+      },
+    }),
+    prisma.auditLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: {
+        uuid: true,
+        action: true,
+        createdAt: true,
+        metadata: true,
+        actorUser: { select: { email: true } },
+        tenant: { select: { name: true, slug: true } },
+      },
+    }),
+    prisma.tenant.findMany({
+      where: {
+        type: TenantType.SUB,
+        deletedAt: null,
+        createdAt: { gte: startOfMonthsAgo(6) },
+      },
+      select: { createdAt: true, status: true },
+    }),
+    prisma.tenant.count({
+      where: {
+        type: TenantType.SUB,
+        status: TenantStatus.SUSPENDED,
+        deletedAt: null,
+      },
+    }),
+  ]);
 
   const growthMap = new Map<string, number>();
   for (let i = 0; i < 6; i += 1) {
@@ -78,10 +108,6 @@ export async function getPlatformDashboard(session: SessionPayload) {
     }
   }
 
-  const suspendedSubTenants = await prisma.tenant.count({
-    where: { type: TenantType.SUB, status: TenantStatus.SUSPENDED },
-  });
-
   return {
     totalSubTenants,
     activeSubTenants,
@@ -95,68 +121,88 @@ export async function getPlatformDashboard(session: SessionPayload) {
       { status: "ACTIVE", count: activeSubTenants },
       { status: "SUSPENDED", count: suspendedSubTenants },
     ],
-    recentSubTenants: recentTenants,
+    recentSubTenants: recentTenants.map((t) => ({
+      id: t.uuid,
+      uuid: t.uuid,
+      name: t.name,
+      slug: t.slug,
+      type: t.type,
+      status: t.status,
+      createdAt: t.createdAt.toISOString(),
+    })),
     recentActivity: auditLogs.map((log) => ({
-      id: log.id,
+      id: log.uuid,
       action: log.action,
       createdAt: log.createdAt,
       actorEmail: log.actorUser?.email ?? null,
-      targetTenantName: log.targetTenant?.name ?? null,
-      targetTenantSlug: log.targetTenant?.slug ?? null,
+      targetTenantName: log.tenant?.name ?? null,
+      targetTenantSlug: log.tenant?.slug ?? null,
     })),
   };
 }
 
 export async function getTenantDashboard(session: SessionPayload) {
-  if (session.role !== UserRole.ADMIN && session.role !== UserRole.EDITOR) {
-    throw forbidden("Tenant dashboard requires Admin or Editor");
+  if (
+    session.role !== "ADMIN" &&
+    session.role !== "EDITOR" &&
+    session.role !== "AUTHOR"
+  ) {
+    throw forbidden("Tenant dashboard requires Admin, Editor, or Author");
   }
 
   const tenant = await prisma.tenant.findUnique({
-    where: { id: session.tenantId },
+    where: { uuid: session.tenantId },
   });
 
   if (!tenant || tenant.type !== TenantType.SUB) {
     throw forbidden("Invalid sub-tenant session");
   }
 
-  const [totalUsers, activeUsers, recentUsers, auditLogs] = await Promise.all([
-    prisma.user.count({ where: { tenantId: session.tenantId } }),
-    prisma.user.count({
-      where: { tenantId: session.tenantId, status: UserStatus.ACTIVE },
-    }),
-    prisma.user.findMany({
-      where: { tenantId: session.tenantId },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        status: true,
-        createdAt: true,
-      },
-    }),
-    prisma.auditLog.findMany({
-      where: { targetTenantId: session.tenantId },
-      orderBy: { createdAt: "desc" },
-      take: 8,
-      select: {
-        id: true,
-        action: true,
-        createdAt: true,
-        actorUser: { select: { email: true } },
-      },
-    }),
-  ]);
+  const [totalUsers, activeUsers, recentMemberships, auditLogs] =
+    await Promise.all([
+      prisma.tenantMembership.count({
+        where: {
+          tenantUuid: session.tenantId,
+          user: { deletedAt: null },
+        },
+      }),
+      prisma.tenantMembership.count({
+        where: {
+          tenantUuid: session.tenantId,
+          user: { deletedAt: null, status: UserStatus.ACTIVE },
+        },
+      }),
+      prisma.tenantMembership.findMany({
+        where: {
+          tenantUuid: session.tenantId,
+          user: { deletedAt: null },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 8,
+        include: { user: true, role: true },
+      }),
+      prisma.auditLog.findMany({
+        where: { tenantUuid: session.tenantId },
+        orderBy: { createdAt: "desc" },
+        take: 8,
+        select: {
+          uuid: true,
+          action: true,
+          createdAt: true,
+          actorUser: { select: { email: true } },
+        },
+      }),
+    ]);
 
-  // Content/media modules are not implemented yet — return explicit zeros.
   return {
     tenant: {
-      id: tenant.id,
+      id: tenant.uuid,
+      uuid: tenant.uuid,
       name: tenant.name,
       slug: tenant.slug,
+      type: tenant.type,
       status: tenant.status,
+      createdAt: tenant.createdAt.toISOString(),
     },
     totalUsers,
     activeUsers,
@@ -171,9 +217,21 @@ export async function getTenantDashboard(session: SessionPayload) {
       { status: "DRAFT", count: 0 },
       { status: "PUBLISHED", count: 0 },
     ],
-    recentUsers,
+    recentUsers: recentMemberships.map((row) => ({
+      id: row.user.uuid,
+      email: row.user.email,
+      username: row.user.username,
+      firstName: row.user.firstName,
+      lastName: row.user.lastName,
+      fullName: displayFullName(row.user),
+      type: "SUB",
+      role: row.role.code,
+      status: row.user.status,
+      tenantId: session.tenantId,
+      createdAt: row.user.createdAt,
+    })),
     recentActivity: auditLogs.map((log) => ({
-      id: log.id,
+      id: log.uuid,
       action: log.action,
       createdAt: log.createdAt,
       actorEmail: log.actorUser?.email ?? null,

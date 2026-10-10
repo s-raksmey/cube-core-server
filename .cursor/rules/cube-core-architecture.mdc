@@ -1,0 +1,86 @@
+---
+description: Cube Core software architecture — apps, auth, tenancy, GraphQL, and module boundaries every feature must follow
+alwaysApply: true
+---
+
+# Cube Core — Software Architecture
+
+Canonical docs: `docs/ARCHITECTURE.md`, `docs/ROLES-AND-TENANCY.md`, `docs/TECH-STACK.md`, `docs/AUTH-2FA.md`.
+
+When building any feature, **read those docs + existing code first**. Do not invent a parallel architecture.
+
+## Four apps (do not merge)
+
+| App | Responsibility |
+| --- | --- |
+| `cube-core-server` | System of record: GraphQL, Prisma, auth, domain, audit |
+| `cube-core-admin` | Main console UI (SuperAdmin). BFF + Apollo → server |
+| `cube-core-tenant` | Sub-tenant console UI (Admin/Editor/Author). BFF + Apollo → server |
+| `cube-core-website` | Public marketing only — no privileged GraphQL |
+
+- Domain logic lives in **server** `src/modules/*` services.
+- Resolvers stay thin — call services, never put business rules only in UI.
+- Frontends use BFF `app/api/*` + cookies; never store secrets in localStorage.
+
+## Locked stack (do not swap)
+
+- Next.js App Router + TypeScript + Zod
+- Server: PostgreSQL, Prisma 6, GraphQL Yoga + SDL (`src/graphql/schema.graphql`), jose cookies, Argon2id/bcrypt verify
+- Frontends: Tailwind + **shadcn/ui** + Apollo Client (admin/tenant)
+- No Nest, tRPC, Redux, alternate UI kits, or microservices for v1
+
+## Tenancy & roles (hard)
+
+```text
+MAIN tenant (slug: core-super-admin, singleton)
+  └── users + tenant_memberships → SUPERADMIN only
+
+SUB tenants (children of MAIN)
+  └── users + tenant_memberships → ADMIN | EDITOR | AUTHOR
+```
+
+- Unified identity: `users`, `roles`, `tenant_memberships` (not MainUser/SubUser).
+- **Never** create a second MAIN tenant.
+- **Never** let SuperAdmin obtain a sub-tenant / tenant-app session.
+- **Never** let Admin/Editor/Author sign into the main console.
+- Separate cookies/audiences: `ADMIN_CONSOLE` vs `TENANT_APP`.
+- UI may hide actions; **server must enforce** role + tenant on every operation.
+
+## Auth pattern (reuse, do not duplicate)
+
+1. Password (username **or** email) → short-lived challenge (no API access)
+2. Activation: username + password + mandatory TOTP + recovery codes (shown once)
+3. Returning login: TOTP verify (recovery-code path available)
+4. Then issue console-specific session
+
+Password reset: **SuperAdmin-generated links only** (no public forgot-password).
+
+## Server layout
+
+```text
+src/modules/{auth,tenants,users,dashboard}/   # domain services
+src/graphql/{schema.graphql,resolvers.ts,context.ts}
+src/lib/{db,auth,errors}
+prisma/schema.prisma
+app/api/{graphql,auth,admin}/…
+```
+
+- Validate inputs with Zod in services.
+- Write `audit_logs` on privileged mutations.
+- Prefer unified `users` / memberships / sessions over inventing parallel auth tables.
+
+## Frontend layout
+
+- Admin SuperAdmin nav: Dashboard, Tenants, **Users** (`/users` = Main Tenant User Management), Settings, Audit, Health
+- Admin User Management manages **MAIN SUPERADMIN memberships only**
+- Sub-tenant user invites: activation links (`createAdminUser` / tenant Users page)
+- Tenant app: strictly one sub-tenant scope; reject SuperAdmin at login
+- Use existing `components/ui` (shadcn), dashboard shells, GraphQL operations in `lib/graphql/`
+
+## Feature checklist (before claiming done)
+
+1. Correct app(s) touched; server owns authz + data rules
+2. Role/tenant isolation unchanged
+3. SDL + resolvers + service (not UI-only filtering)
+4. Docs updated if behavior/architecture/roles changed
+5. Reused patterns; no alternate stack

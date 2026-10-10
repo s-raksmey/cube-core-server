@@ -25,7 +25,7 @@ Build in thin vertical slices. Prefer one working path (login → scoped data) o
 - [x] `requireAuth` / `requireRole` / `requireTenantAccess` (via service guards)
 - [x] Reject SuperAdmin on invalid tenant type pairing
 - [x] Create/list/update sub-tenants (SuperAdmin, remote manage only)
-- [x] Create Admin users
+- [x] Create Admin/Editor/Author users via activation
 - [x] Audit log writes on privileged mutations
 
 ## Phase 2 — Management console shell (`cube-core-admin`)
@@ -35,6 +35,7 @@ Build in thin vertical slices. Prefer one working path (login → scoped data) o
 - [x] SuperAdmin dashboard
 - [x] Tenants create/suspend from dashboard (full directory page later)
 - [x] Admins create from dashboard (full directory page later)
+- [x] Main Tenant User Management (`/users`) — SuperAdmin CRUD + activation/reset links
 - [x] Admin dashboard + recent users (own tenant)
 - [ ] Settings + audit full pages (placeholders + dashboard feeds exist)
 - [x] Brand tokens + shared dashboard components
@@ -42,7 +43,8 @@ Build in thin vertical slices. Prefer one working path (login → scoped data) o
 
 ## Phase 3 — Tenant app MVP (`cube-core-tenant`)
 
-- [x] Tenant Admin/Editor auth path (`LoginAudience.TENANT_APP`, SuperAdmin rejected)
+- [x] Tenant Admin/Editor/Author auth path (`LoginAudience.TENANT_APP`, SuperAdmin rejected)
+- [x] Tenant Users invite + activation wiring
 - [x] Tenant dashboard + shadcn sidebar shell (branded)
 - [x] Suspended-tenant blocking (auth service)
 - [ ] Basic profile/settings full module (placeholder pages exist)
@@ -68,4 +70,5 @@ Build in thin vertical slices. Prefer one working path (login → scoped data) o
 3. SuperAdmin cannot log in to that sub-tenant (console session or tenant app).
 4. Suspended sub-tenant blocks Admin access.
 5. Audit log records create/suspend/user changes.
-6. Admin UI and server agree on the two-role model (no hidden third console role).
+6. Admin UI and server agree on sub-tenant roles ADMIN | EDITOR | AUTHOR (MAIN is SUPERADMIN only).
+7. Activation requires username + password + 2FA + one-time recovery codes.

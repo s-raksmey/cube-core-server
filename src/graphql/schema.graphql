@@ -1,9 +1,3 @@
-enum UserRole {
-  SUPERADMIN
-  ADMIN
-  EDITOR
-}
-
 enum TenantType {
   MAIN
   SUB
@@ -15,8 +9,30 @@ enum TenantStatus {
 }
 
 enum UserStatus {
+  PENDING
   ACTIVE
   DISABLED
+}
+
+enum UserType {
+  MAIN
+  SUB
+}
+
+enum SubTenantRole {
+  ADMIN
+  EDITOR
+  AUTHOR
+}
+
+enum LoginAudience {
+  ADMIN_CONSOLE
+  TENANT_APP
+}
+
+enum AuthNextStep {
+  TOTP_ENROLL
+  TOTP_VERIFY
 }
 
 type Tenant {
@@ -31,15 +47,78 @@ type Tenant {
 type User {
   id: ID!
   email: String!
-  role: UserRole!
+  username: String
+  fullName: String!
+  firstName: String
+  lastName: String
+  type: UserType!
+  role: String!
   status: UserStatus
   tenantId: ID!
   tenant: Tenant!
   createdAt: String
+  lastLoginAt: String
+  totpEnabled: Boolean
+}
+
+type MainTenantUserPage {
+  items: [User!]!
+  total: Int!
+  page: Int!
+  pageSize: Int!
+}
+
+type TenantUserPage {
+  items: [User!]!
+  total: Int!
+  page: Int!
+  pageSize: Int!
+}
+
+type CreateMainTenantUserPayload {
+  user: User!
+  activationUrl: String!
+  expiresAt: String!
+}
+
+type CreateTenantUserPayload {
+  user: User!
+  activationUrl: String!
+  expiresAt: String!
+}
+
+type ActivationLinkPayload {
+  activationUrl: String!
+  expiresAt: String!
+  user: User!
+}
+
+input UpdateMainTenantUserInput {
+  firstName: String
+  lastName: String
+  email: String
+  status: UserStatus
 }
 
 type AuthPayload {
-  token: String!
+  accessToken: String!
+  refreshToken: String!
+  audience: LoginAudience!
+  user: User!
+}
+
+type AuthChallenge {
+  challengeToken: String!
+  nextStep: AuthNextStep!
+  qrCodeDataUrl: String
+  manualEntryKey: String
+}
+
+union LoginResult = AuthPayload | AuthChallenge
+
+type PasswordResetLinkPayload {
+  resetUrl: String!
+  expiresAt: String!
   user: User!
 }
 
@@ -97,11 +176,9 @@ type Query {
   platformDashboard: PlatformDashboard!
   tenantDashboard: TenantDashboard!
   subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
-}
-
-enum LoginAudience {
-  ADMIN_CONSOLE
-  TENANT_APP
+  mainTenantUsers(search: String, page: Int, pageSize: Int): MainTenantUserPage!
+  mainTenantUser(id: ID!): User!
+  tenantUsers(search: String, page: Int, pageSize: Int): TenantUserPage!
 }
 
 type Mutation {
@@ -109,9 +186,27 @@ type Mutation {
     email: String!
     password: String!
     audience: LoginAudience = ADMIN_CONSOLE
-  ): AuthPayload!
+  ): LoginResult!
+  verifyLoginTotp(challengeToken: String!, code: String!): AuthPayload!
+  verifyTotpEnrollment(challengeToken: String!, code: String!): AuthPayload!
+  generatePasswordResetLink(userId: ID!): PasswordResetLinkPayload!
+  generateMainTenantUserPasswordResetLink(userId: ID!): PasswordResetLinkPayload!
+  generateMainTenantUserActivationLink(userId: ID!): ActivationLinkPayload!
   logout: Boolean!
   createSubTenant(name: String!, slug: String!): Tenant!
   setSubTenantStatus(tenantId: ID!, status: TenantStatus!): Tenant!
-  createAdminUser(email: String!, password: String!, tenantId: ID!): User!
+  createAdminUser(
+    email: String!
+    firstName: String!
+    lastName: String!
+    tenantId: ID
+    role: SubTenantRole = ADMIN
+  ): CreateTenantUserPayload!
+  createMainTenantUser(
+    firstName: String!
+    lastName: String!
+    email: String!
+  ): CreateMainTenantUserPayload!
+  updateMainTenantUser(id: ID!, input: UpdateMainTenantUserInput!): User!
+  deleteMainTenantUser(id: ID!): Boolean!
 }

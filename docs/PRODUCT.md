@@ -107,7 +107,7 @@ The console should let privileged users create tenants, manage users, configure 
 
 - Shared shell: sidebar, top bar, role/tenant badge
 - SuperAdmin always shows **main tenant** identity (never “inside” a sub-tenant)
-- SuperAdmin navigation: Tenants, Admins/Editors, Platform Settings, Audit, Dashboard
+- SuperAdmin navigation: Tenants, Users (Main Tenant SuperAdmins), Platform Settings, Audit, Dashboard
 - Admin navigation: Dashboard, Users, Settings, Audit
 - Editor navigation: Dashboard, Content/Operations, limited Settings/Audit
 - Tables with search / filter / pagination

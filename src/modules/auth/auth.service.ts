@@ -1,112 +1,127 @@
-import { TenantStatus, UserRole, UserStatus } from "@prisma/client";
-import { prisma } from "@/src/lib/db";
+import { TenantStatus, UserStatus } from "@prisma/client";
+import type { AuthAudience } from "@prisma/client";
 import { verifyPassword } from "@/src/lib/auth/password";
-import { createSessionToken } from "@/src/lib/auth/session";
-import { forbidden, unauthenticated, validationError } from "@/src/lib/errors";
+import { unauthenticated } from "@/src/lib/errors";
+import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
+import {
+  beginTotpEnrollment,
+  createLoginChallenge,
+} from "@/src/modules/auth/totp.service";
+import {
+  assertConsoleAuthorization,
+  findAccountByEmailOrUsername,
+  findAccountByUuid,
+  mapAuthUser,
+} from "@/src/modules/users/account";
 
-export type LoginAudience = "ADMIN_CONSOLE" | "TENANT_APP";
+export type LoginAudience = AuthAudience;
 
-export async function login(
-  email: string,
+export type LoginStepResult =
+  | {
+      status: "CHALLENGE";
+      nextStep: "TOTP_ENROLL" | "TOTP_VERIFY";
+      challengeToken: string;
+      qrCodeDataUrl?: string;
+      manualEntryKey?: string;
+    }
+  | {
+      status: "AUTHENTICATED";
+      accessToken: string;
+      refreshToken: string;
+      audience: AuthAudience;
+      user: ReturnType<typeof mapAuthUser>;
+    };
+
+export async function loginWithPassword(
+  identifier: string,
   password: string,
   audience: LoginAudience = "ADMIN_CONSOLE",
-) {
-  const normalizedEmail = email.trim().toLowerCase();
-  if (!normalizedEmail || !password) {
-    throw validationError("Email and password are required");
-  }
-
-  const user = await prisma.user.findUnique({
-    where: { email: normalizedEmail },
-    include: { tenant: true },
-  });
-
-  if (!user || user.status !== UserStatus.ACTIVE) {
+  correlationId?: string,
+): Promise<LoginStepResult> {
+  const normalizedId = identifier.trim().toLowerCase();
+  const normalizedPassword = password.trim();
+  if (!normalizedId || !normalizedPassword) {
     throw unauthenticated("Invalid email or password");
   }
 
-  if (user.tenant.status === TenantStatus.SUSPENDED) {
-    throw forbidden("Tenant is suspended");
+  const account = await findAccountByEmailOrUsername(normalizedId);
+
+  if (!account || account.status !== UserStatus.ACTIVE || !account.passwordHash) {
+    await writeAuthAudit({
+      action: "auth.login.failed",
+      correlationId,
+      metadata: { reason: "invalid_credentials", audience },
+    });
+    throw unauthenticated("Invalid email or password");
   }
 
-  const valid = await verifyPassword(password, user.passwordHash);
+  if (account.tenant.status === TenantStatus.SUSPENDED) {
+    throw unauthenticated("Invalid email or password");
+  }
+
+  const valid = await verifyPassword(normalizedPassword, account.passwordHash);
   if (!valid) {
+    await writeAuthAudit({
+      action: "auth.login.failed",
+      actorUserUuid: account.uuid,
+      tenantUuid: account.tenantUuid,
+      correlationId,
+      metadata: { reason: "invalid_credentials", audience },
+    });
     throw unauthenticated("Invalid email or password");
   }
 
-  // SuperAdmin cannot log into the sub-tenant app.
-  if (audience === "TENANT_APP") {
-    if (user.role === UserRole.SUPERADMIN) {
-      throw forbidden("SuperAdmin cannot log into a sub-tenant");
-    }
-    if (user.role !== UserRole.ADMIN && user.role !== UserRole.EDITOR) {
-      throw forbidden("Only Admin or Editor can access the tenant app");
-    }
-    if (user.tenant.type !== "SUB") {
-      throw forbidden("Tenant app login requires a sub-tenant account");
-    }
-  } else {
-    // Admin console: SuperAdmin on main; Admin/Editor on sub-tenant.
-    if (user.role === UserRole.SUPERADMIN && user.tenant.type !== "MAIN") {
-      throw forbidden("SuperAdmin must belong to the main tenant");
-    }
-    if (
-      (user.role === UserRole.ADMIN || user.role === UserRole.EDITOR) &&
-      user.tenant.type !== "SUB"
-    ) {
-      throw forbidden("Admin and Editor must belong to a sub-tenant");
-    }
+  try {
+    assertConsoleAuthorization(account, audience);
+  } catch (error) {
+    await writeAuthAudit({
+      action: "auth.login.rejected_console",
+      actorUserUuid: account.uuid,
+      tenantUuid: account.tenantUuid,
+      correlationId,
+      metadata: { audience, role: account.roleCode },
+    });
+    throw error;
   }
 
-  const token = await createSessionToken({
-    userId: user.id,
-    role: user.role,
-    tenantId: user.tenantId,
+  if (!account.totpEnabledAt || !account.totpSecretEnc) {
+    const enrollment = await beginTotpEnrollment({
+      userUuid: account.uuid,
+      tenantUuid: account.tenantUuid,
+      email: account.email,
+      audience,
+    });
+    await writeAuthAudit({
+      action: "auth.2fa.enrollment.started",
+      actorUserUuid: account.uuid,
+      tenantUuid: account.tenantUuid,
+      correlationId,
+    });
+    return {
+      status: "CHALLENGE",
+      nextStep: "TOTP_ENROLL",
+      challengeToken: enrollment.challengeToken,
+      qrCodeDataUrl: enrollment.qrCodeDataUrl,
+      manualEntryKey: enrollment.manualEntryKey,
+    };
+  }
+
+  const { challengeToken } = await createLoginChallenge({
+    userUuid: account.uuid,
+    tenantUuid: account.tenantUuid,
+    audience,
+    type: "TOTP_VERIFY",
   });
 
   return {
-    token,
-    user: {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      tenantId: user.tenantId,
-      tenant: {
-        id: user.tenant.id,
-        name: user.tenant.name,
-        slug: user.tenant.slug,
-        type: user.tenant.type,
-        status: user.tenant.status,
-      },
-    },
+    status: "CHALLENGE",
+    nextStep: "TOTP_VERIFY",
+    challengeToken,
   };
 }
 
-export async function getMe(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { tenant: true },
-  });
-
-  if (!user || user.status !== UserStatus.ACTIVE) {
-    throw unauthenticated();
-  }
-
-  if (user.tenant.status === TenantStatus.SUSPENDED) {
-    throw forbidden("Tenant is suspended");
-  }
-
-  return {
-    id: user.id,
-    email: user.email,
-    role: user.role,
-    tenantId: user.tenantId,
-    tenant: {
-      id: user.tenant.id,
-      name: user.tenant.name,
-      slug: user.tenant.slug,
-      type: user.tenant.type,
-      status: user.tenant.status,
-    },
-  };
+export async function getMe(userId: string, tenantId?: string) {
+  const account = await findAccountByUuid(userId, tenantId);
+  if (!account) return null;
+  return mapAuthUser(account);
 }

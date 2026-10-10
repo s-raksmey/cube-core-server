@@ -1,5 +1,7 @@
 # Software Architecture
 
+Cursor agents must follow `.cursor/rules/cube-core-architecture.mdc` (mirrored in admin/tenant/website). Treat this doc as the human-readable source of truth; keep the rule in sync when architecture changes.
+
 ## High-level view
 
 ```text
@@ -115,15 +117,31 @@ src/
 ### Console login
 
 ```text
-User submits credentials in cube-core-admin
-  → GraphQL mutation login
-  → server validates user + tenant status
-  → server returns HTTP-only signed cookie session (jose) with role + tenantId
-  → admin app stores session securely
-  → subsequent GraphQL requests send session
+User opens `/` (landing) → Get Started navigates to `/login`
+  → User submits credentials on `/login`
+  → admin BFF POST /api/auth/login (Zod-validated body)
+  → BFF calls GraphQL mutation login(audience: ADMIN_CONSOLE)
+  → server validates user + tenant status + audience rules
+  → server returns session token (jose)
+  → BFF sets audience-specific HTTP-only cookies; no public signup on admin
+  → subsequent GraphQL requests send session cookie
   → server builds GraphQL context { user, role, tenantId }
   → resolver checks permission matrix
   → returns scoped data
+```
+
+Identity is unified (`users` + `roles` + `tenant_memberships`). Main Console SuperAdmin accounts are provisioned via User Management (`createMainTenantUser`) with an activation link — never self-registered. Sub-tenant Admin/Editor/Author invites use `createAdminUser` (activation, not plaintext password). Audience `ADMIN_CONSOLE` allows MAIN / SuperAdmin only. Audience `TENANT_APP` allows SUB / Admin|Editor|Author only. Login accepts username or email.
+
+### Main Tenant user management
+
+```text
+SuperAdmin opens /users (User Management)
+  → mainTenantUsers query (MAIN + SUPERADMIN memberships only)
+  → createMainTenantUser(firstName, lastName, email) → PENDING user + membership + `/activate` URL
+  → invitee sets username + password + 2FA + saves recovery codes
+  → updateMainTenantUser (first/last/email/status; role/tenant fixed)
+  → deleteMainTenantUser (soft-disable + revoke sessions)
+  → generateMainTenantUserPasswordResetLink / generateMainTenantUserActivationLink
 ```
 
 ### SuperAdmin creates a sub-tenant
@@ -228,4 +246,4 @@ Revisit schema-per-tenant or DB-per-tenant only if compliance/contracts require 
 - Separate auth microservice
 - Event-driven choreography between many services
 - Duplicate business rules in each frontend
-- Building full RBAC matrix before the two-role model is working end-to-end
+- Building full RBAC matrix before SUPERADMIN + ADMIN/EDITOR/AUTHOR isolation is working end-to-end
