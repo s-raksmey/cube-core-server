@@ -69,13 +69,13 @@ The GraphQL endpoint is `http://localhost:4000/graphql`. The server exposes no N
 
 Already installed: Apollo Client, Zod, **shadcn/ui** (Nova / Radix), GraphQL Codegen.
 
-Admin uses the Next.js `src/` layout. Operations live in `src/graphql/*.gql`. After the **server GraphQL SDL** changes (`cube-core-server/src/graphql/schema.graphql`), regenerate admin Apollo types:
+Admin uses the Next.js `src/` layout. GraphQL operation documents live under `src/graphql`; Apollo client and generated artifacts live under `src/lib/apollo`. After the server GraphQL SDL or operation documents change, regenerate types with:
 
 ```bash
 npm run graphql:codegen
 ```
 
-(Prisma migrations update the database; codegen updates TypeScript from the GraphQL schema — run codegen whenever the SDL or admin `.gql` operations change.)
+(Prisma migrations update the database; codegen updates TypeScript from the GraphQL schema. Run it in each frontend after its SDL or `.gql` documents change.)
 
 ```bash
 # add more UI pieces as needed
@@ -89,11 +89,17 @@ GRAPHQL_SERVER_URL="http://localhost:4000/graphql"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
 
-Dev: `npm run dev` → port **3000**. Apollo calls same-origin `/graphql` (rewritten to the server).
+Dev: `npm run dev` → port **3000**. Apollo calls same-origin `/graphql`.
 
 ## 4. `cube-core-tenant` (sub-tenant app)
 
 Already installed: Apollo Client, Zod, **shadcn/ui** (same preset as admin). Uses Next.js `src/` layout (`src/app`, `src/components`, `src/lib`).
+
+GraphQL operation documents live under `src/graphql`; Apollo client and generated artifacts live under `src/lib/apollo`. Regenerate generated documents/types after server SDL or operation document changes:
+
+```powershell
+npm run graphql:codegen
+```
 
 `.env.local`:
 
@@ -106,11 +112,18 @@ Dev: `npm run dev` → port **3001**
 
 ## 5. `cube-core-website` (public site)
 
-Already installed: **shadcn/ui** (same preset). Uses Next.js `src/` layout. No GraphQL in v1.
+Already installed: Apollo Client, GraphQL Code Generator, and **shadcn/ui** (same preset). Uses Next.js `src/` layout. GraphQL operation documents live under `src/graphql`; Apollo client and generated artifacts live under `src/lib/apollo`. Website operations must be public reads; do not add privileged mutations.
+
+Regenerate generated documents/types after server SDL or operation document changes:
+
+```powershell
+npm run graphql:codegen
+```
 
 `.env.local`:
 
 ```env
+GRAPHQL_SERVER_URL="http://localhost:4000/graphql"
 NEXT_PUBLIC_ADMIN_LOGIN_URL="http://localhost:3000/login"
 NEXT_PUBLIC_TENANT_LOGIN_URL="http://localhost:3001/login"
 ```

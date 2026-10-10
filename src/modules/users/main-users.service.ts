@@ -30,7 +30,7 @@ const updateSchema = z.object({
   email: z.string().trim().email().max(254).optional(),
   firstName: namePart.optional(),
   lastName: namePart.optional(),
-  status: z.enum(["ACTIVE", "DISABLED", "PENDING"]).optional(),
+  status: z.enum(["ACTIVE", "LOCKED", "DISABLED", "PENDING"]).optional(),
 });
 const listSchema = z.object({
   search: z.string().trim().max(120).optional(),
@@ -51,7 +51,7 @@ export function assertCanRemoveLastActiveSuperAdmin(options: {
   const disablingActive =
     options.targetStatus === UserStatus.ACTIVE &&
     (options.nextStatus === undefined ||
-      options.nextStatus === UserStatus.DISABLED);
+      options.nextStatus !== UserStatus.ACTIVE);
   if (disablingActive && options.activeSuperAdminCount <= 1) {
     throw validationError("Cannot remove the last active SuperAdmin account");
   }
@@ -222,7 +222,7 @@ export async function updateMainTenantUser(
     email?: string;
     firstName?: string;
     lastName?: string;
-    status?: "ACTIVE" | "DISABLED" | "PENDING";
+    status?: UserStatus;
   },
 ) {
   await requireSuperAdmin(session);
@@ -240,12 +240,12 @@ export async function updateMainTenantUser(
     throw validationError("User not found");
   }
 
-  if (parsed.data.status === UserStatus.DISABLED) {
+  if (parsed.data.status && parsed.data.status !== UserStatus.ACTIVE) {
     assertCanRemoveLastActiveSuperAdmin({
       targetUserId: existing.uuid,
       actorUserId: session.userId,
       targetStatus: existing.status,
-      nextStatus: UserStatus.DISABLED,
+      nextStatus: parsed.data.status,
       activeSuperAdminCount: await countActiveSuperAdmins(),
     });
   }
@@ -271,11 +271,23 @@ export async function updateMainTenantUser(
         ? { email: parsed.data.email.toLowerCase() }
         : {}),
       ...(parsed.data.status !== undefined ? { status: parsed.data.status } : {}),
+      ...(parsed.data.status === UserStatus.ACTIVE
+        ? {
+            lockedUntil: null,
+            failedPasswordAttempts: 0,
+            failedTotpAttempts: 0,
+          }
+        : {}),
+      ...(parsed.data.status === UserStatus.LOCKED &&
+      existing.status !== UserStatus.LOCKED
+        ? { lockedUntil: null }
+        : {}),
     },
   });
 
   if (
-    parsed.data.status === UserStatus.DISABLED &&
+    parsed.data.status !== undefined &&
+    parsed.data.status !== UserStatus.ACTIVE &&
     existing.status === UserStatus.ACTIVE
   ) {
     await revokeAllUserSessions(existing.uuid);

@@ -7,7 +7,7 @@
 | Main | `cube-core-admin` | `ADMIN_CONSOLE` | `management_console_admin_session` |
 | Sub-tenant | `cube-core-tenant` | `TENANT_APP` | `management_console_tenant_session` |
 
-Access tokens (30s) use `management_console_*_access` cookies. Refresh tokens last 30 days. Cookies are HttpOnly, `SameSite=Lax`, and scoped per console — never shared.
+Access tokens (30s) use `management_console_*_access` cookies. Refresh tokens last 30 days and rotate on each refresh. Cookies are HttpOnly, `SameSite=Lax`, and scoped per console — never shared.
 
 ## Authorization
 
@@ -22,9 +22,10 @@ Access tokens (30s) use `management_console_*_access` cookies. Refresh tokens la
 2. Short-lived signed **challenge** (no protected session).
 3. First login (if 2FA not yet enabled): TOTP enrollment (QR shown once) + GraphQL `verifyTotpEnrollment`.
 4. Returning login: GraphQL `verifyLoginTotp` (or `verifyRecoveryCode`).
-5. Admin Server Action sets HttpOnly access/refresh cookies; then hard navigate to the console.
+5. The admin Server Action or tenant same-origin auth handler stores the returned session tokens in HttpOnly cookies; the browser receives only the user/challenge response.
+6. Three failed password attempts or three failed 2FA/recovery attempts set account status to `LOCKED`, revoke sessions and outstanding challenges, and block login for 15 minutes. The next login attempt after the lock expires restores the previous pending/active state. SuperAdmins can manually restore a locked account from User Management.
 
-`cube-core-admin` uses Apollo → `/graphql` rewrite → server (no auth HTTP proxy routes on admin).
+The admin uses typed, generated GraphQL documents from a Server Action for authentication and Apollo through a same-origin `/graphql` BFF route. The BFF refreshes/rotates the session only when its access cookie expires, then proxies the operation. The tenant uses its same-origin auth handlers as a BFF; they call the GraphQL server and set cookies without returning session tokens to browser JavaScript.
 
 ## Activation
 

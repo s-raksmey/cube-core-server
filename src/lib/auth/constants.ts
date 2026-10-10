@@ -20,7 +20,9 @@ export const TOTP_PENDING_TTL_MS = 15 * 60 * 1000;
 export const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000;
 /** Account activation links (SuperAdmin-provisioned). */
 export const ACTIVATION_TTL_MS = 24 * 60 * 60 * 1000;
-export const MAX_CHALLENGE_ATTEMPTS = 8;
+export const MAX_CHALLENGE_ATTEMPTS = 3;
+export const MAX_ACCOUNT_AUTH_ATTEMPTS = 3;
+export const ACCOUNT_LOCKOUT_TTL_MS = 15 * 60 * 1000;
 export const RECOVERY_CODE_COUNT = 8;
 
 export type LoginAudience = AuthAudience;

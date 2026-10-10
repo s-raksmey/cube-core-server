@@ -22,6 +22,7 @@ export type LoadedAccount = {
   totpSecretEnc: string | null;
   totpEnabledAt: Date | null;
   sessionsRevokedAt: Date | null;
+  lockedUntil: Date | null;
   tenant: {
     uuid: string;
     name: string;
@@ -96,6 +97,7 @@ async function loadFromMembership(
     totpSecretEnc: user.twoFactorAuth?.encryptedSecret ?? null,
     totpEnabledAt: user.twoFactorAuth?.enabledAt ?? null,
     sessionsRevokedAt: user.sessionsRevokedAt,
+    lockedUntil: user.lockedUntil,
     tenant: {
       uuid: tenant.uuid,
       name: tenant.name,

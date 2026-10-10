@@ -26,6 +26,13 @@ import {
 import { hashPassword, verifyPassword } from "@/src/lib/auth/password";
 import { forbidden, unauthenticated, validationError } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
+import {
+  accountLockedNotice,
+  clearExpiredAccountLockout,
+  failedAttemptNotice,
+  recordFailedAuthAttempt,
+  resetFailedTotpAttempts,
+} from "@/src/modules/auth/lockout.service";
 import { createAuthenticatedSession } from "@/src/modules/auth/session.service";
 import {
   findAccountByUuid,
@@ -61,9 +68,16 @@ async function loadChallenge(challengeToken: string) {
     throw unauthenticated("Invalid sign-in challenge. Please sign in again.");
   }
 
-  const account = await findAccountByUuid(challenge.userUuid, challenge.tenantUuid);
+  let account = await findAccountByUuid(challenge.userUuid, challenge.tenantUuid);
   if (!account) {
     throw unauthenticated("Invalid sign-in challenge. Please sign in again.");
+  }
+  if (account.status === "LOCKED") {
+    const unlocked = await clearExpiredAccountLockout(account.uuid);
+    if (unlocked) account = await findAccountByUuid(challenge.userUuid, challenge.tenantUuid);
+    if (!account || account.status === "LOCKED") {
+      throw unauthenticated(accountLockedNotice(account?.lockedUntil ?? null));
+    }
   }
 
   return { challenge, payload, account };
@@ -79,8 +93,8 @@ async function incrementFailedAttempt(challengeId: string) {
       where: { uuid: challengeId },
       data: { consumedAt: new Date() },
     });
-    throw unauthenticated("Too many attempts. Start sign-in again.");
   }
+  return updated.attemptCount;
 }
 
 async function consumeChallenge(challengeId: string) {
@@ -226,16 +240,21 @@ export async function verifyTotpEnrollment(input: {
   const valid = await verifyTotpCode(secret, input.code);
   if (!valid) {
     await incrementFailedAttempt(challenge.uuid);
+    const attempt = await recordFailedAuthAttempt(account, "totp");
     await writeAuthAudit({
       action: "auth.2fa.enrollment.failed",
       actorUserUuid: account.uuid,
       tenantUuid: account.tenantUuid,
       correlationId: input.correlationId,
     });
-    throw unauthenticated("Invalid verification code");
+    if (attempt.locked) {
+      throw unauthenticated(accountLockedNotice(new Date(Date.now() + 15 * 60 * 1000)));
+    }
+    throw unauthenticated(failedAttemptNotice("totp", attempt.remaining));
   }
 
   await assertTotpNotReplayed(account.uuid, secret, input.code);
+  await resetFailedTotpAttempts(account.uuid);
 
   await prisma.userTwoFactorAuth.update({
     where: { userUuid: account.uuid },
@@ -295,16 +314,21 @@ export async function verifyLoginTotp(input: {
   const valid = await verifyTotpCode(secret, input.code);
   if (!valid) {
     await incrementFailedAttempt(challenge.uuid);
+    const attempt = await recordFailedAuthAttempt(account, "totp");
     await writeAuthAudit({
       action: "auth.2fa.verify.failed",
       actorUserUuid: account.uuid,
       tenantUuid: account.tenantUuid,
       correlationId: input.correlationId,
     });
-    throw unauthenticated("Invalid verification code");
+    if (attempt.locked) {
+      throw unauthenticated(accountLockedNotice(new Date(Date.now() + 15 * 60 * 1000)));
+    }
+    throw unauthenticated(failedAttemptNotice("totp", attempt.remaining));
   }
 
   await assertTotpNotReplayed(account.uuid, secret, input.code);
+  await resetFailedTotpAttempts(account.uuid);
   await consumeChallenge(challenge.uuid);
   await writeAuthAudit({
     action: "auth.2fa.verify.success",
@@ -344,13 +368,24 @@ export async function verifyRecoveryCode(input: {
 
   if (!matchedId) {
     await incrementFailedAttempt(challenge.uuid);
-    throw unauthenticated("Invalid recovery code");
+    const attempt = await recordFailedAuthAttempt(account, "totp");
+    await writeAuthAudit({
+      action: "auth.2fa.recovery.failed",
+      actorUserUuid: account.uuid,
+      tenantUuid: account.tenantUuid,
+      correlationId: input.correlationId,
+    });
+    if (attempt.locked) {
+      throw unauthenticated(accountLockedNotice(new Date(Date.now() + 15 * 60 * 1000)));
+    }
+    throw unauthenticated(failedAttemptNotice("totp", attempt.remaining));
   }
 
   await prisma.userRecoveryCode.update({
     where: { uuid: matchedId },
     data: { usedAt: new Date() },
   });
+  await resetFailedTotpAttempts(account.uuid);
   await consumeChallenge(challenge.uuid);
 
   await writeAuthAudit({

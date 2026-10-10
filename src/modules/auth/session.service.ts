@@ -94,10 +94,20 @@ export async function refreshAuthenticatedSession(input: {
     throw unauthenticated("Session revoked");
   }
 
-  await prisma.userSession.update({
-    where: { uuid: session.uuid },
-    data: { lastUsedAt: new Date() },
+  const nextRefreshToken = randomToken(48);
+  const rotated = await prisma.userSession.updateMany({
+    where: {
+      uuid: session.uuid,
+      refreshTokenHash,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    data: {
+      refreshTokenHash: hashToken(nextRefreshToken),
+      lastUsedAt: new Date(),
+    },
   });
+  if (rotated.count !== 1) throw unauthenticated("Session expired");
 
   const accessToken = await createAccessToken({
     userId: account.uuid,
@@ -107,7 +117,12 @@ export async function refreshAuthenticatedSession(input: {
     sessionId: session.uuid,
   });
 
-  return { accessToken, account, audience: session.audience };
+  return {
+    accessToken,
+    refreshToken: nextRefreshToken,
+    account,
+    audience: session.audience,
+  };
 }
 
 export async function revokeSessionById(sessionId: string) {

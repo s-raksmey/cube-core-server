@@ -64,15 +64,15 @@ All three UI apps use **shadcn/ui**:
 | --- | --- | --- |
 | `cube-core-admin` (main tenant console) | shadcn/ui + Tailwind | Apollo Client |
 | `cube-core-tenant` (sub-tenant app) | shadcn/ui + Tailwind | Apollo Client |
-| `cube-core-website` (public site) | shadcn/ui + Tailwind | None in v1 |
+| `cube-core-website` (public site) | shadcn/ui + Tailwind | Apollo Client (public reads only) |
 
 | Concern | Choice | Why this one |
 | --- | --- | --- |
 | Component system | **shadcn/ui** (`radix-nova` preset) | Ownable components, Radix a11y, consistent across apps |
 | Icons | **lucide-react** | Default with Nova preset |
 | Class merging | **`cn` utility** (`lib/utils.ts`) | shadcn CLI standard |
-| GraphQL client (admin/tenant) | **Apollo Client** | Cache + console table workflows |
-| GraphQL operation types (admin) | **GraphQL Code Generator** (`*.gql` → typed documents) | Types stay in sync with server SDL |
+| GraphQL client (all frontends) | **Apollo Client** | Shared client contract; cache and typed operations |
+| GraphQL operation types (all frontends) | **GraphQL Code Generator** (`src/graphql/*.gql` → `src/lib/apollo/generated`) | Types stay in sync with server SDL |
 | Forms / validation | **Zod** | Same validation language as server |
 
 ### shadcn conventions

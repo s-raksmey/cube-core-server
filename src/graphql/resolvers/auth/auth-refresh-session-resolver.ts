@@ -17,6 +17,7 @@ export const authRefreshSessionResolver = {
       });
       return {
         accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
         audience: result.audience,
         user: mapAuthUser(result.account),
       };

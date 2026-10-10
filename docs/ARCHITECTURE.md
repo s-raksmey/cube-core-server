@@ -8,7 +8,7 @@ Cursor agents must follow `.cursor/rules/cube-core-architecture.mdc` (mirrored i
 ┌────────────────┐   ┌────────────────┐   ┌────────────────┐
 │ cube-core-     │   │ cube-core-     │   │ cube-core-     │
 │ website        │   │ admin          │   │ tenant         │
-│ (public site)  │   │ (console UI)   │   │ (tenant app)   │
+│ (public reads) │   │ (console UI)   │   │ (tenant app)   │
 └───────┬────────┘   └───────┬────────┘   └───────┬────────┘
         │                    │ GraphQL            │ GraphQL
         │ (mostly static)    │                    │
@@ -83,8 +83,8 @@ Keep **one** SDL file (`schema.graphql`). Split **resolvers** by domain folder w
 ### `cube-core-admin` (management console)
 
 - SuperAdmin UI only
-- Console **data + auth** via Apollo (`src/graphql/*.gql` → `lib/apollo`); types via `npm run graphql:codegen`
-- No HTTP route folder on admin — Next rewrite `/graphql` → server; HttpOnly cookies via Server Actions
+- Console **data + auth** via Apollo (`src/graphql/*.gql` → `src/lib/apollo/generated`); types via `npm run graphql:codegen`
+- Admin routes same-origin `/graphql` through a Next.js BFF Route Handler; login Server Actions and the BFF establish/rotate/clear HttpOnly cookies
 - Never stores session tokens in `localStorage` or JS-readable cookies
 - Tailwind + **shadcn/ui** for layout/components
 
@@ -92,17 +92,17 @@ Layout (`src/` app — Next.js `src` directory):
 
 ```text
 src/
-  app/                       # routes: login, activate, (console)/…
+  app/                       # routes: login, activate, graphql/route.ts, (console)/…
   components/
   hooks/
-  graphql/*.gql              # GraphQL documents only
+  graphql/*.gql              # GraphQL operation documents
   lib/
-    apollo/operations.ts     # Apollo document exports
-    apollo/types.ts          # Apollo operation types
+    apollo-client.ts         # Apollo client
+    apollo/operations.ts     # generated Apollo document exports
     apollo/generated/        # codegen output
-    auth/session-actions.ts  # HttpOnly cookie establish/refresh/clear
+    auth/session-actions.ts  # server-side GraphQL auth + HttpOnly cookie setup
     auth/upstream-actions.ts # server-only activate/reset helpers
-next.config.ts               # rewrite /graphql → GRAPHQL_SERVER_URL
+next.config.ts               # frontend configuration
 ```
 
 ### `cube-core-tenant` (sub-tenant product app)
@@ -113,11 +113,14 @@ next.config.ts               # rewrite /graphql → GRAPHQL_SERVER_URL
 - No platform management screens
 - SuperAdmin must be rejected at login (cannot enter sub-tenant app)
 - Next.js `src/` layout (`src/app`, `src/components`, `src/lib`, …)
+- GraphQL operations in `src/graphql/*.gql`; generated Apollo documents/types in `src/lib/apollo/generated` via `npm run graphql:codegen`
+- Apollo client/provider and same-origin `/graphql` Route Handler, with tenant session refresh/cookie forwarding
 
 ### `cube-core-website` (marketing)
 
-- Public pages only
-- No direct privileged GraphQL mutations
+- Public pages and public GraphQL reads only; no privileged mutations or authenticated console operations
+- GraphQL operations in `src/graphql/*.gql`; generated Apollo documents/types in `src/lib/apollo/generated` via `npm run graphql:codegen`
+- Apollo client/provider and same-origin `/graphql` Route Handler
 - May deep-link to admin/tenant login
 - Next.js `src/` layout (`src/app`, `src/components`, `src/lib`, …)
 
@@ -128,11 +131,11 @@ next.config.ts               # rewrite /graphql → GRAPHQL_SERVER_URL
 ```text
 User opens `/` (landing) → Get Started navigates to `/login`
   → User submits credentials on `/login`
-  → Apollo mutation login(audience: ADMIN_CONSOLE) via `/graphql` rewrite
+  → typed generated Login operation called by an admin Server Action
   → server validates user + tenant status + audience rules
   → challenge → verifyLoginTotp / verifyTotpEnrollment / verifyRecoveryCode
-  → AuthPayload → Server Action sets HttpOnly access/refresh cookies
-  → subsequent GraphQL requests include cookies (ensureAdminSession refreshes access)
+  → verification result → Server Action stores HttpOnly access/refresh cookies; tokens never reach browser JavaScript
+  → same-origin GraphQL BFF forwards the access cookie and rotates the refresh session only when access expires
   → server builds GraphQL context { user, role, tenantId }
   → resolver checks permission matrix
   → returns scoped data
@@ -177,7 +180,7 @@ Admin opens Users page
 
 ## GraphQL shape (current)
 
-Single data contract: GraphQL on the server (`/graphql` only). **Admin** reaches it via same-origin `/graphql` (Next rewrite) and sets **HttpOnly** session cookies with Server Actions after auth mutations — no HTTP proxy routes on admin. Activation / password-reset / refresh use GraphQL; admin Server Actions (`lib/auth/upstream-actions.ts`, `session-actions.ts`) call the server GraphQL endpoint. Do **not** put session tokens in `localStorage` or JS-readable cookies.
+Single data contract: GraphQL on the server (`/graphql` only). Admin and tenant use same-origin `/graphql` Route Handlers as BFFs; website uses a same-origin Route Handler for public reads. Authenticated BFFs refresh and rotate session cookies only when access tokens expire. Login Server Actions and auth BFFs set or clear **HttpOnly** session cookies. Activation and password-reset Server Actions call the server GraphQL endpoint. Do **not** put session tokens in `localStorage` or JS-readable cookies.
 
 ### Queries
 

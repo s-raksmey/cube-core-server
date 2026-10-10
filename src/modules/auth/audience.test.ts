@@ -25,6 +25,7 @@ function account(
     totpSecretEnc: null,
     totpEnabledAt: null,
     sessionsRevokedAt: null,
+    lockedUntil: null,
     tenant: {
       uuid: "t-1",
       name: "T",

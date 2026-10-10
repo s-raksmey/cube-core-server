@@ -4,6 +4,14 @@ import { verifyPassword } from "@/src/lib/auth/password";
 import { unauthenticated } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import {
+  accountLockedNotice,
+  clearExpiredAccountLockout,
+  failedAttemptNotice,
+  INVALID_PASSWORD_LOGIN_NOTICE,
+  recordFailedAuthAttempt,
+  resetFailedPasswordAttempts,
+} from "@/src/modules/auth/lockout.service";
+import {
   beginTotpEnrollment,
   createLoginChallenge,
 } from "@/src/modules/auth/totp.service";
@@ -39,12 +47,18 @@ export async function loginWithPassword(
   correlationId?: string,
 ): Promise<LoginStepResult> {
   const normalizedId = identifier.trim().toLowerCase();
-  const normalizedPassword = password.trim();
+  const normalizedPassword = password;
   if (!normalizedId || !normalizedPassword) {
-    throw unauthenticated("Invalid email or password");
+    throw unauthenticated(INVALID_PASSWORD_LOGIN_NOTICE);
   }
 
-  const account = await findAccountByEmailOrUsername(normalizedId);
+  let account = await findAccountByEmailOrUsername(normalizedId);
+
+  if (account?.status === UserStatus.LOCKED) {
+    const unlocked = await clearExpiredAccountLockout(account.uuid);
+    if (unlocked) account = await findAccountByEmailOrUsername(normalizedId);
+    else throw unauthenticated(accountLockedNotice(account.lockedUntil));
+  }
 
   if (!account || account.status !== UserStatus.ACTIVE || !account.passwordHash) {
     await writeAuthAudit({
@@ -52,15 +66,16 @@ export async function loginWithPassword(
       correlationId,
       metadata: { reason: "invalid_credentials", audience },
     });
-    throw unauthenticated("Invalid email or password");
+    throw unauthenticated(INVALID_PASSWORD_LOGIN_NOTICE);
   }
 
   if (account.tenant.status === TenantStatus.SUSPENDED) {
-    throw unauthenticated("Invalid email or password");
+    throw unauthenticated(INVALID_PASSWORD_LOGIN_NOTICE);
   }
 
   const valid = await verifyPassword(normalizedPassword, account.passwordHash);
   if (!valid) {
+    const attempt = await recordFailedAuthAttempt(account, "password");
     await writeAuthAudit({
       action: "auth.login.failed",
       actorUserUuid: account.uuid,
@@ -68,8 +83,13 @@ export async function loginWithPassword(
       correlationId,
       metadata: { reason: "invalid_credentials", audience },
     });
-    throw unauthenticated("Invalid email or password");
+    if (attempt.locked) {
+      throw unauthenticated(accountLockedNotice(new Date(Date.now() + 15 * 60 * 1000)));
+    }
+    throw unauthenticated(failedAttemptNotice("password", attempt.remaining));
   }
+
+  await resetFailedPasswordAttempts(account.uuid);
 
   try {
     assertConsoleAuthorization(account, audience);

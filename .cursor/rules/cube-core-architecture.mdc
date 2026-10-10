@@ -16,16 +16,16 @@ When building any feature, **read those docs + existing code first**. Do not inv
 | `cube-core-server` | System of record: GraphQL, Prisma, auth, domain, audit |
 | `cube-core-admin` | Main console UI (SuperAdmin). BFF + Apollo → server |
 | `cube-core-tenant` | Sub-tenant console UI (Admin/Editor/Author). BFF + Apollo → server |
-| `cube-core-website` | Public marketing only — no privileged GraphQL |
+| `cube-core-website` | Public marketing site; public GraphQL reads only |
 
 - Domain logic lives in **server** `src/modules/*` services.
 - Resolvers stay thin — call services, never put business rules only in UI.
-- Admin: Apollo → `/graphql` rewrite + HttpOnly cookies via Server Actions; never localStorage tokens.
+- Frontend GraphQL documents live in `src/graphql/*.gql`; generated Apollo artifacts live in `src/lib/apollo/generated`. Website operations are public reads only. Never localStorage tokens.
 
 ## Locked stack (do not swap)
 
 - Server: Node HTTP + TypeScript + Zod + PostgreSQL + Prisma 6 + GraphQL Yoga + SDL (`src/graphql/schema.graphql`), jose cookies, Argon2id/bcrypt verify
-- Frontends: Next.js App Router + Tailwind + **shadcn/ui** + Apollo Client (admin/tenant)
+- Frontends: Next.js App Router + Tailwind + **shadcn/ui** + Apollo Client and GraphQL Code Generator
 - No Nest, tRPC, Redux, alternate UI kits, or microservices for v1
 
 ## Tenancy & roles (hard)
@@ -77,8 +77,10 @@ prisma/schema.prisma
 - Admin User Management manages **MAIN SUPERADMIN memberships only**
 - Sub-tenant user invites: activation links (`createAdminUser` / tenant Users page)
 - Tenant app: strictly one sub-tenant scope; reject SuperAdmin at login
+- Run `npm run graphql:codegen` in each frontend after SDL or operation document changes
+- Website GraphQL is public-read only; never add privileged mutations
 - Admin / tenant / website use Next.js `src/` layout (`src/app`, `src/components`, `src/lib`, …)
-- Admin GraphQL docs: `src/graphql/*.gql` + `src/lib/apollo`; run `npm run graphql:codegen` after server SDL changes
+- Admin/tenant/website GraphQL docs: `src/graphql/*.gql` + `src/lib/apollo`; run `npm run graphql:codegen` after server SDL changes
 
 ## Feature checklist (before claiming done)
 

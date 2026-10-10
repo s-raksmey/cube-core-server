@@ -20,6 +20,7 @@ enum TenantStatus {
 enum UserStatus {
   PENDING
   ACTIVE
+  LOCKED
   DISABLED
 }
 
@@ -40,22 +41,22 @@ enum AuthChallengeType {
 }
 
 model Tenant {
-  uuid             String              @id @default(uuid()) @map("uuid")
+  uuid             String               @id @default(uuid()) @map("uuid")
   name             String
-  slug             String              @unique
+  slug             String               @unique
   type             TenantType
-  parentTenantUuid String?             @map("parent_tenant_uuid")
-  parentTenant     Tenant?             @relation("TenantHierarchy", fields: [parentTenantUuid], references: [uuid])
-  childTenants     Tenant[]            @relation("TenantHierarchy")
-  status           TenantStatus        @default(ACTIVE)
-  settings         Json                @default("{}")
+  parentTenantUuid String?              @map("parent_tenant_uuid")
+  parentTenant     Tenant?              @relation("TenantHierarchy", fields: [parentTenantUuid], references: [uuid])
+  childTenants     Tenant[]             @relation("TenantHierarchy")
+  status           TenantStatus         @default(ACTIVE)
+  settings         Json                 @default("{}")
   memberships      TenantMembership[]
   sessions         UserSession[]
   challenges       AuthLoginChallenge[]
   auditLogs        AuditLog[]
-  createdAt        DateTime            @default(now()) @map("created_at")
-  updatedAt        DateTime            @updatedAt @map("updated_at")
-  deletedAt        DateTime?           @map("deleted_at")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  deletedAt        DateTime?            @map("deleted_at")
 
   @@index([parentTenantUuid])
   @@index([type, status])
@@ -63,47 +64,50 @@ model Tenant {
 }
 
 model Role {
-  uuid         String             @id @default(uuid()) @map("uuid")
-  code         String             @unique
-  name         String
-  description  String?
-  memberships  TenantMembership[]
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @updatedAt @map("updated_at")
+  uuid        String             @id @default(uuid()) @map("uuid")
+  code        String             @unique
+  name        String
+  description String?
+  memberships TenantMembership[]
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
 
   @@map("roles")
 }
 
 model User {
-  uuid              String                   @id @default(uuid()) @map("uuid")
-  firstName         String                   @map("first_name")
-  lastName          String                   @map("last_name")
-  username          String?                  @unique
-  email             String                   @unique
-  passwordHash      String?                  @map("password_hash")
-  status            UserStatus               @default(PENDING)
-  createdByUuid     String?                  @map("created_by")
-  createdBy         User?                    @relation("UserCreatedBy", fields: [createdByUuid], references: [uuid])
-  createdUsers      User[]                   @relation("UserCreatedBy")
-  activatedAt       DateTime?                @map("activated_at")
-  lastLoginAt       DateTime?                @map("last_login_at")
-  sessionsRevokedAt DateTime?                @map("sessions_revoked_at")
-  createdAt         DateTime                 @default(now()) @map("created_at")
-  updatedAt         DateTime                 @updatedAt @map("updated_at")
-  deletedAt         DateTime?                @map("deleted_at")
+  uuid                   String     @id @default(uuid()) @map("uuid")
+  firstName              String     @map("first_name")
+  lastName               String     @map("last_name")
+  username               String?    @unique
+  email                  String     @unique
+  passwordHash           String?    @map("password_hash")
+  status                 UserStatus @default(PENDING)
+  createdByUuid          String?    @map("created_by")
+  createdBy              User?      @relation("UserCreatedBy", fields: [createdByUuid], references: [uuid])
+  createdUsers           User[]     @relation("UserCreatedBy")
+  activatedAt            DateTime?  @map("activated_at")
+  lastLoginAt            DateTime?  @map("last_login_at")
+  sessionsRevokedAt      DateTime?  @map("sessions_revoked_at")
+  failedPasswordAttempts Int        @default(0) @map("failed_password_attempts")
+  failedTotpAttempts     Int        @default(0) @map("failed_totp_attempts")
+  lockedUntil            DateTime?  @map("locked_until")
+  createdAt              DateTime   @default(now()) @map("created_at")
+  updatedAt              DateTime   @updatedAt @map("updated_at")
+  deletedAt              DateTime?  @map("deleted_at")
 
-  memberships         TenantMembership[]
-  activationTokens    UserActivationToken[]
-  passwordResetTokens UserPasswordResetToken[]
-  twoFactorAuth       UserTwoFactorAuth?
-  recoveryCodes       UserRecoveryCode[]
-  sessions            UserSession[]
-  challenges          AuthLoginChallenge[]
-  totpReplayGuards    AuthTotpReplayGuard[]
-  auditLogs           AuditLog[]             @relation("AuditActor")
-  createdActivationTokens UserActivationToken[] @relation("ActivationCreatedBy")
-  createdResetTokens  UserPasswordResetToken[] @relation("ResetCreatedBy")
-  createdMemberships  TenantMembership[]     @relation("MembershipCreatedBy")
+  memberships             TenantMembership[]
+  activationTokens        UserActivationToken[]
+  passwordResetTokens     UserPasswordResetToken[]
+  twoFactorAuth           UserTwoFactorAuth?
+  recoveryCodes           UserRecoveryCode[]
+  sessions                UserSession[]
+  challenges              AuthLoginChallenge[]
+  totpReplayGuards        AuthTotpReplayGuard[]
+  auditLogs               AuditLog[]               @relation("AuditActor")
+  createdActivationTokens UserActivationToken[]    @relation("ActivationCreatedBy")
+  createdResetTokens      UserPasswordResetToken[] @relation("ResetCreatedBy")
+  createdMemberships      TenantMembership[]       @relation("MembershipCreatedBy")
 
   @@index([status])
   @@map("users")

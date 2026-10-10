@@ -25,6 +25,18 @@ describe("assertCanRemoveLastActiveSuperAdmin", () => {
     ).toThrow(/last active SuperAdmin/i);
   });
 
+  it("rejects changing the last active SuperAdmin to pending", () => {
+    expect(() =>
+      assertCanRemoveLastActiveSuperAdmin({
+        targetUserId: "other",
+        actorUserId: "me",
+        targetStatus: UserStatus.ACTIVE,
+        nextStatus: UserStatus.PENDING,
+        activeSuperAdminCount: 1,
+      }),
+    ).toThrow(/last active SuperAdmin/i);
+  });
+
   it("allows deleting another SuperAdmin when more than one remain active", () => {
     expect(() =>
       assertCanRemoveLastActiveSuperAdmin({
