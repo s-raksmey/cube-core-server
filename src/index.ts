@@ -9,6 +9,7 @@ const yoga = createYoga<GraphQLContext>({
   schema,
   context: createContext,
   graphqlEndpoint: "/graphql",
+  maxRequestBodySize: 1_000_000,
   cors: {
     origin: [
       process.env.ADMIN_APP_URL ?? "http://localhost:3000",

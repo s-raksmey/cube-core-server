@@ -406,7 +406,12 @@ export async function deleteTenantUser(
       tenant: { type: TenantType.SUB },
       user: { deletedAt: null },
     },
-    include: { user: true, role: true },
+    select: {
+      uuid: true,
+      userUuid: true,
+      user: { select: { email: true } },
+      role: { select: { code: true } },
+    },
   });
   if (!membership) throw validationError("User not found");
   if (membership.userUuid === session.userId) {
@@ -433,7 +438,12 @@ export async function deleteTenantUser(
         tenant: { type: TenantType.SUB },
         user: { deletedAt: null },
       },
-      include: { user: true, role: true },
+      select: {
+        uuid: true,
+        userUuid: true,
+        role: { select: { code: true } },
+        user: { select: { status: true } },
+      },
     });
     if (!current) throw validationError("User not found");
 

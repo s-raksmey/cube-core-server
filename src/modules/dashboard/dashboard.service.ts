@@ -178,7 +178,20 @@ export async function getTenantDashboard(session: SessionPayload) {
         },
         orderBy: { createdAt: "desc" },
         take: 8,
-        include: { user: true, role: true },
+        select: {
+          role: { select: { code: true } },
+          user: {
+            select: {
+              uuid: true,
+              email: true,
+              username: true,
+              firstName: true,
+              lastName: true,
+              status: true,
+              createdAt: true,
+            },
+          },
+        },
       }),
       prisma.auditLog.findMany({
         where: { tenantUuid: session.tenantId },

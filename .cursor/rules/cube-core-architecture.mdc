@@ -15,7 +15,7 @@ When building any feature, **read those docs + existing code first**. Do not inv
 | --- | --- |
 | `cube-core-server` | System of record: GraphQL, Prisma, auth, domain, audit |
 | `cube-core-admin` | Main console UI (SuperAdmin). BFF + Apollo → server |
-| `cube-core-tenant` | Sub-tenant console UI (Admin/Editor/Author). BFF + Apollo → server |
+| `cube-core-tenant` | Sub-tenant console UI (Admin/Editor). BFF + Apollo → server |
 | `cube-core-website` | Public marketing site; public GraphQL reads only |
 
 - Domain logic lives in **server** `src/modules/*` services.
@@ -41,7 +41,7 @@ SUB tenants (children of MAIN)
 - Unified identity: `users`, `roles`, `tenant_memberships` (not MainUser/SubUser).
 - **Never** create a second MAIN tenant.
 - **Never** let SuperAdmin obtain a sub-tenant / tenant-app session.
-- **Never** let Admin/Editor/Author sign into the main console.
+- **Never** let Admin/Editor sign into the main console.
 - Separate cookies/audiences: `ADMIN_CONSOLE` vs `TENANT_APP`.
 - UI may hide actions; **server must enforce** role + tenant on every operation.
 

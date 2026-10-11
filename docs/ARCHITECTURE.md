@@ -182,6 +182,8 @@ Admin opens Users page
 
 Single data contract: GraphQL on the server (`/graphql` only). Admin and tenant use same-origin `/graphql` Route Handlers as BFFs; website uses a same-origin Route Handler for public reads. Authenticated BFFs refresh and rotate session cookies only when access tokens expire. Login Server Actions and auth BFFs set or clear **HttpOnly** session cookies. Activation and password-reset Server Actions call the server GraphQL endpoint. Do **not** put session tokens in `localStorage` or JS-readable cookies.
 
+The admin and tenant BFFs must validate same-origin requests, accept JSON only, cap request bodies, use bounded upstream timeouts, and disable caching for authenticated GraphQL traffic. Refresh mutations require the matching server-only `ADMIN_AUTH_ACTION_SECRET` or `TENANT_AUTH_ACTION_SECRET`; never send these secrets to browser code or pass them through general GraphQL requests.
+
 ### Queries
 
 - `me`
