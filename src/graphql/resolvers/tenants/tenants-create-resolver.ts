@@ -6,7 +6,12 @@ export const tenantsCreateResolver = {
   Mutation: {
     createSubTenant: async (
       _: unknown,
-      args: { name: string; slug: string },
+      args: {
+        name: string;
+        slug: string;
+        managementDomain?: string | null;
+        websiteDomain?: string | null;
+      },
       ctx: GraphQLContext,
     ) => {
       return createSubTenant(requireSession(ctx), args);

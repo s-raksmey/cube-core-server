@@ -9,12 +9,15 @@ export const authLoginResolver = {
         email: string;
         password: string;
         audience?: "ADMIN_CONSOLE" | "TENANT_APP";
+        tenantHostname?: string | null;
       },
     ) => {
       const result = await loginWithPassword(
         args.email,
         args.password,
         args.audience ?? "ADMIN_CONSOLE",
+        undefined,
+        args.tenantHostname ?? undefined,
       );
       if (result.status === "CHALLENGE") {
         return {

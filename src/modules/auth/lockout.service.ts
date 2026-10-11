@@ -14,7 +14,7 @@ export const INVALID_PASSWORD_LOGIN_NOTICE =
 
 export function accountStatusLoginNotice(status: UserStatus) {
   if (status === UserStatus.PENDING) {
-    return "Your account is pending activation. Use your activation link to finish setup, or contact your SuperAdmin for help.";
+    return "Your account setup is incomplete. Open your activation link to set your password and finish two-factor setup. If you no longer have the link, contact your SuperAdmin for a new one.";
   }
   if (status === UserStatus.INACTIVE) {
     return "Your account is inactive. Contact your SuperAdmin to restore access.";

@@ -8,11 +8,31 @@ enum TenantStatus {
   SUSPENDED
 }
 
+enum TenantDomainPurpose {
+  MANAGEMENT
+  WEBSITE
+}
+
+enum TenantDomainStatus {
+  PENDING_VERIFICATION
+  PENDING_DNS
+  ACTIVE
+  ERROR
+  DISABLED
+}
+
 enum UserStatus {
   PENDING
   ACTIVE
   LOCKED
   INACTIVE
+}
+
+enum ActivationStatus {
+  PENDING
+  EXPIRED
+  ACTIVE
+  DISABLED
 }
 
 enum UserType {
@@ -42,6 +62,47 @@ type Tenant {
   type: TenantType!
   status: TenantStatus!
   createdAt: String!
+  managementDomain: String
+  websiteDomain: String
+  managementDomainStatus: TenantDomainStatus
+  websiteDomainStatus: TenantDomainStatus
+  managementDomainVerifiedAt: String
+  websiteDomainVerifiedAt: String
+  localDevelopmentHostname: String
+  userCount: Int
+}
+
+type TenantDomainVerification {
+  purpose: TenantDomainPurpose!
+  hostname: String!
+  status: TenantDomainStatus!
+  verifiedAt: String
+  recordName: String
+  recordValue: String
+}
+
+type TenantDomainResolution {
+  id: ID!
+  name: String!
+  slug: String!
+  type: TenantType!
+  status: TenantStatus!
+  managementDomain: String
+  websiteDomain: String
+}
+
+type PublicTenantBranding {
+  id: ID!
+  name: String!
+  slug: String!
+}
+
+input UpdateSubTenantInput {
+  name: String!
+  slug: String!
+  managementDomain: String
+  websiteDomain: String
+  localDevelopmentHostname: String
 }
 
 type User {
@@ -75,6 +136,29 @@ type TenantUserPage {
   pageSize: Int!
 }
 
+type ManagedSubTenantUser {
+  id: ID!
+  fullName: String!
+  email: String!
+  role: String!
+  accountStatus: UserStatus!
+  activationStatus: ActivationStatus!
+  activationLinkCreatedAt: String
+  activationLinkExpiresAt: String
+}
+
+type ManagedSubTenantUserPage {
+  items: [ManagedSubTenantUser!]!
+  total: Int!
+  page: Int!
+  pageSize: Int!
+}
+
+type TenantActivationLinkPayload {
+  activationUrl: String!
+  expiresAt: String!
+}
+
 type CreateMainTenantUserPayload {
   user: User!
   activationUrl: String!
@@ -102,6 +186,14 @@ input UpdateMainTenantUserInput {
   firstName: String
   lastName: String
   email: String
+  status: UserStatus
+}
+
+input UpdateTenantUserInput {
+  email: String
+  firstName: String
+  lastName: String
+  role: SubTenantRole
   status: UserStatus
 }
 
@@ -219,13 +311,24 @@ type RefreshSessionPayload {
 
 type Query {
   mainTenantUserActivationLink(userId: ID!): ExistingActivationLinkPayload
+  subTenantUserActivationLink(tenantId: ID!, userId: ID!): ExistingActivationLinkPayload
+  tenantUserActivationLink(userId: ID!): ExistingActivationLinkPayload
   me: User
   platformDashboard: PlatformDashboard!
   tenantDashboard: TenantDashboard!
   subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
+  subTenant(id: ID!): Tenant!
+  tenantByHostname(
+    hostname: String!
+    purpose: TenantDomainPurpose!
+  ): TenantDomainResolution
+  tenantById(id: ID!): PublicTenantBranding
+  tenantBySlug(slug: String!): PublicTenantBranding
+  localDevelopmentTenant: PublicTenantBranding
   mainTenantUsers(search: String, page: Int, pageSize: Int): MainTenantUserPage!
   mainTenantUser(id: ID!): User!
   tenantUsers(search: String, page: Int, pageSize: Int): TenantUserPage!
+  subTenantUsers(tenantId: ID!, search: String, page: Int, pageSize: Int): ManagedSubTenantUserPage!
   validateActivationToken(token: String!): ActivationValidatePayload!
   validatePasswordResetToken(token: String!): PasswordResetValidatePayload!
 }
@@ -235,6 +338,7 @@ type Mutation {
     email: String!
     password: String!
     audience: LoginAudience = ADMIN_CONSOLE
+    tenantHostname: String
   ): LoginResult!
   verifyLoginTotp(challengeToken: String!, code: String!): AuthPayload!
   verifyTotpEnrollment(challengeToken: String!, code: String!): AuthPayload!
@@ -262,7 +366,16 @@ type Mutation {
   generateMainTenantUserPasswordResetLink(userId: ID!): PasswordResetLinkPayload!
   generateMainTenantUserActivationLink(userId: ID!): ActivationLinkPayload!
   logout: Boolean!
-  createSubTenant(name: String!, slug: String!): Tenant!
+  createSubTenant(
+    name: String!
+    slug: String!
+    managementDomain: String
+    websiteDomain: String
+  ): Tenant!
+  updateSubTenant(tenantId: ID!, input: UpdateSubTenantInput!): Tenant!
+  startTenantDomainVerification(tenantId: ID!, purpose: TenantDomainPurpose!): TenantDomainVerification!
+  checkTenantDomainVerification(tenantId: ID!, purpose: TenantDomainPurpose!): TenantDomainVerification!
+  activateTenantDomain(tenantId: ID!, purpose: TenantDomainPurpose!, confirmHttpsAndRouting: Boolean!): TenantDomainVerification!
   setSubTenantStatus(tenantId: ID!, status: TenantStatus!): Tenant!
   createAdminUser(
     email: String!
@@ -271,6 +384,10 @@ type Mutation {
     tenantId: ID
     role: SubTenantRole = ADMIN
   ): CreateTenantUserPayload!
+  regenerateSubTenantUserActivationLink(tenantId: ID!, userId: ID!): TenantActivationLinkPayload!
+  updateTenantUser(id: ID!, input: UpdateTenantUserInput!): User!
+  generateTenantUserActivationLink(userId: ID!): ActivationLinkPayload!
+  generateTenantUserPasswordResetLink(userId: ID!): PasswordResetLinkPayload!
   deleteTenantUser(id: ID!): Boolean!
   createMainTenantUser(
     firstName: String!

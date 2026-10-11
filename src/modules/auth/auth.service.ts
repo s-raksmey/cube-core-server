@@ -1,8 +1,12 @@
-import { TenantStatus, UserStatus } from "@prisma/client";
+import { TenantDomainPurpose, TenantStatus, UserStatus } from "@prisma/client";
 import type { AuthAudience } from "@prisma/client";
 import { z } from "zod";
 import { verifyPassword } from "@/src/lib/auth/password";
 import { unauthenticated } from "@/src/lib/errors";
+import {
+  findActiveTenantByHostname,
+} from "@/src/modules/tenants/tenant-domain.service";
+import { findLocalDevelopmentTenant } from "@/src/modules/tenants/local-development-tenant.service";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import {
   accountLockedNotice,
@@ -30,6 +34,7 @@ const loginInputSchema = z.object({
   identifier: z.string().trim().min(1).max(254),
   password: z.string().min(1).max(128),
   audience: z.enum(["ADMIN_CONSOLE", "TENANT_APP"]),
+  tenantHostname: z.string().trim().min(1).max(253).optional(),
 });
 
 export type LoginStepResult =
@@ -53,19 +58,43 @@ export async function loginWithPassword(
   password: string,
   audience: LoginAudience = "ADMIN_CONSOLE",
   correlationId?: string,
+  tenantHostname?: string,
 ): Promise<LoginStepResult> {
-  const parsed = loginInputSchema.safeParse({ identifier, password, audience });
+  const parsed = loginInputSchema.safeParse({ identifier, password, audience, tenantHostname });
   if (!parsed.success) {
     throw unauthenticated(INVALID_PASSWORD_LOGIN_NOTICE);
   }
   const normalizedId = parsed.data.identifier.toLowerCase();
   const normalizedPassword = parsed.data.password;
+  let targetTenantUuid: string | undefined;
+  if (audience === "TENANT_APP") {
+    if (!parsed.data.tenantHostname) {
+      throw unauthenticated("Select a tenant before signing in");
+    }
+    if (parsed.data.tenantHostname === "localhost") {
+      if (process.env.NODE_ENV === "production") {
+        throw unauthenticated(INVALID_PASSWORD_LOGIN_NOTICE);
+      }
+      const tenant = await findLocalDevelopmentTenant();
+      if (!tenant) throw unauthenticated("This tenant console address is unavailable");
+      targetTenantUuid = tenant.uuid;
+    } else {
+      const tenant = await findActiveTenantByHostname(
+        parsed.data.tenantHostname,
+        TenantDomainPurpose.MANAGEMENT,
+      );
+      if (!tenant) throw unauthenticated(INVALID_PASSWORD_LOGIN_NOTICE);
+      targetTenantUuid = tenant.uuid;
+    }
+  } else if (parsed.data.tenantHostname) {
+    throw unauthenticated(INVALID_PASSWORD_LOGIN_NOTICE);
+  }
 
-  let account = await findAccountByEmailOrUsername(normalizedId);
+  let account = await findAccountByEmailOrUsername(normalizedId, targetTenantUuid);
 
   if (account?.status === UserStatus.LOCKED) {
     const unlocked = await clearExpiredAccountLockout(account.uuid);
-    if (unlocked) account = await findAccountByEmailOrUsername(normalizedId);
+    if (unlocked) account = await findAccountByEmailOrUsername(normalizedId, targetTenantUuid);
     else throw unauthenticated(accountLockedNotice(account.lockedUntil));
   }
 

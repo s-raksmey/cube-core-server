@@ -11,6 +11,10 @@ import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden, unauthenticated, validationError } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import { revokeAllUserSessions } from "@/src/modules/auth/session.service";
+import {
+  findManagementHostname,
+  managementAppBaseUrl,
+} from "@/src/modules/tenants/tenant-domain.service";
 import { findAccountByUuid, mapAuthUser } from "@/src/modules/users/account";
 
 export function assertNotSelfPasswordReset(
@@ -96,8 +100,8 @@ export async function generateSubTenantUserPasswordResetLink(
   targetUserUuid: string,
   correlationId?: string,
 ) {
-  if (session.role !== "SUPERADMIN") {
-    throw forbidden("Only SuperAdmin can generate password reset links");
+  if (session.role !== "SUPERADMIN" && session.role !== "ADMIN") {
+    throw forbidden("Only an authorized administrator can generate password reset links");
   }
 
   assertNotSelfPasswordReset(session.userId, targetUserUuid);
@@ -105,6 +109,9 @@ export async function generateSubTenantUserPasswordResetLink(
   const target = await findAccountByUuid(targetUserUuid);
   if (!target || target.tenant.type !== TenantType.SUB) {
     throw validationError("User not found");
+  }
+  if (session.role === "ADMIN" && target.tenantUuid !== session.tenantId) {
+    throw forbidden("You can only manage users in your own tenant");
   }
 
   const rawToken = randomToken(32);
@@ -126,9 +133,10 @@ export async function generateSubTenantUserPasswordResetLink(
     }),
   ]);
 
-  const baseUrl = (process.env.TENANT_APP_URL ?? "http://localhost:3001").replace(
-    /\/$/,
-    "",
+  const managementHostname = await findManagementHostname(target.tenantUuid);
+  const baseUrl = managementAppBaseUrl(
+    managementHostname,
+    process.env.TENANT_APP_URL ?? "http://localhost:3001",
   );
   const resetUrl = `${baseUrl}/password-reset?token=${encodeURIComponent(rawToken)}`;
 

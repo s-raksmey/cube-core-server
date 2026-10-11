@@ -5,9 +5,12 @@ import { parseCookieHeader } from "@/src/lib/auth/session";
 import { ACCESS_COOKIE_BY_AUDIENCE } from "@/src/lib/auth/constants";
 import { resolveSessionFromAccessToken } from "@/src/modules/auth/session.service";
 import type { SessionPayload } from "@/src/lib/auth/session";
+import { TenantDomainPurpose } from "@prisma/client";
+import { findActiveTenantByHostname } from "@/src/modules/tenants/tenant-domain.service";
 
 export type GraphQLContext = {
   session: SessionPayload | null;
+  tenantHostMismatch: boolean;
   trustedAuthAudience: AuthAudience | null;
   request: Request;
 };
@@ -52,13 +55,47 @@ export async function createContext(
   const token = await tokenFromRequest(request);
 
   if (!token) {
-    return { session: null, trustedAuthAudience: trustedAuthAudience(request), request };
+    return {
+      session: null,
+      tenantHostMismatch: false,
+      trustedAuthAudience: trustedAuthAudience(request),
+      request,
+    };
   }
 
   try {
     const session = await resolveSessionFromAccessToken(token);
-    return { session, trustedAuthAudience: trustedAuthAudience(request), request };
+    const managementHostname = request.headers.get(
+      "x-cube-tenant-management-host",
+    );
+    if (managementHostname) {
+      // This binding only rejects a session whose tenant differs from the
+      // hostname. The signed session and membership remain the authority.
+      const tenant = await findActiveTenantByHostname(
+        managementHostname,
+        TenantDomainPurpose.MANAGEMENT,
+      );
+      if (!tenant || tenant.uuid !== session.tenantId) {
+        return {
+          session: null,
+          tenantHostMismatch: true,
+          trustedAuthAudience: trustedAuthAudience(request),
+          request,
+        };
+      }
+    }
+    return {
+      session,
+      tenantHostMismatch: false,
+      trustedAuthAudience: trustedAuthAudience(request),
+      request,
+    };
   } catch {
-    return { session: null, trustedAuthAudience: trustedAuthAudience(request), request };
+    return {
+      session: null,
+      tenantHostMismatch: false,
+      trustedAuthAudience: trustedAuthAudience(request),
+      request,
+    };
   }
 }

@@ -85,16 +85,35 @@ async function loadChallenge(
   }
 
   const statusNotice = accountStatusLoginNotice(account.status);
-  const pendingActivationEnrollment =
-    options.allowPendingActivation === true &&
-    challenge.type === AuthChallengeType.TOTP_ENROLL &&
-    challenge.audience === AuthAudience.ADMIN_CONSOLE &&
-    account.status === "PENDING";
+  const pendingActivationEnrollment = permitsPendingActivationEnrollment(
+    options,
+    challenge,
+    account,
+  );
   if (statusNotice && !pendingActivationEnrollment) {
     throw unauthenticated(statusNotice);
   }
 
   return { challenge, payload, account };
+}
+
+/**
+ * Activation enrollment is the sole TOTP operation permitted for a pending
+ * account. Both consoles can create this challenge: SuperAdmins activate
+ * Main-tenant users and SuperAdmins activate Sub-tenant Admins/Editors.
+ */
+export function permitsPendingActivationEnrollment(
+  options: { allowPendingActivation?: boolean },
+  challenge: { type: AuthChallengeType; audience: AuthAudience },
+  account: { status: string },
+) {
+  return (
+    options.allowPendingActivation === true &&
+    challenge.type === AuthChallengeType.TOTP_ENROLL &&
+    (challenge.audience === AuthAudience.ADMIN_CONSOLE ||
+      challenge.audience === AuthAudience.TENANT_APP) &&
+    account.status === "PENDING"
+  );
 }
 
 async function incrementFailedAttempt(challengeId: string) {

@@ -2,6 +2,8 @@ import {
   MembershipStatus,
   Prisma,
   TenantStatus,
+  TenantDomainStatus,
+  TenantDomainPurpose,
   TenantType,
   UserStatus,
 } from "@prisma/client";
@@ -9,8 +11,26 @@ import { z } from "zod";
 import { prisma } from "@/src/lib/db";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden, validationError } from "@/src/lib/errors";
-import { createActivationToken } from "@/src/modules/auth/activation.service";
+import {
+  createActivationToken,
+  getExistingActivationLink,
+} from "@/src/modules/auth/activation.service";
+import { generateSubTenantUserPasswordResetLink } from "@/src/modules/auth/password-reset.service";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
+import {
+  findActiveTenantByHostname,
+  findActiveTenantById,
+  findActiveTenantBySlug,
+  createDomainVerificationToken,
+  domainVerificationRecordName,
+  hasDomainVerificationRecord,
+  normalizeTenantHostname,
+  syncTenantDomains,
+} from "@/src/modules/tenants/tenant-domain.service";
+import {
+  LOCAL_DEVELOPMENT_HOSTNAME,
+  setLocalDevelopmentAssignment,
+} from "@/src/modules/tenants/local-development-tenant.service";
 import {
   displayFullName,
   getMainTenant,
@@ -19,15 +39,122 @@ import {
   findAccountByUuid,
 } from "@/src/modules/users/account";
 
-const createSubTenantSchema = z.object({
+function optionalHostname() {
+  return z.preprocess(
+    (value) => (typeof value === "string" && !value.trim() ? null : value),
+    z
+      .string()
+      .trim()
+      .transform((value, ctx) => {
+        const normalized = normalizeTenantHostname(value);
+        if (!normalized) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Enter a valid hostname without a protocol, port, or path",
+          });
+          return z.NEVER;
+        }
+        return normalized;
+      })
+      .nullable()
+      .optional(),
+  );
+}
+
+const tenantDomainsSchema = {
+  managementDomain: optionalHostname(),
+  websiteDomain: optionalHostname(),
+};
+
+const localDevelopmentHostnameSchema = z.preprocess(
+  (value) => (typeof value === "string" && !value.trim() ? null : value),
+  z
+    .string()
+    .trim()
+    .transform((value, ctx) => {
+      if (value !== LOCAL_DEVELOPMENT_HOSTNAME) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Local development hostname must be localhost or empty",
+        });
+        return z.NEVER;
+      }
+      return value;
+    })
+    .nullable()
+    .optional(),
+);
+
+function rejectDuplicateDomains<T extends {
+  managementDomain?: string | null;
+  websiteDomain?: string | null;
+}>(schema: z.ZodType<T>) {
+  return schema.superRefine((value, ctx) => {
+    for (const field of ["managementDomain", "websiteDomain"] as const) {
+      const hostname = value[field];
+      if (hostname === "localhost" || hostname?.endsWith(".localhost")) {
+        ctx.addIssue({
+          code: "custom",
+          path: [field],
+          message:
+            "Localhost is shared by all local tenants and cannot be configured as a custom domain",
+        });
+      }
+    }
+    if (
+      value.managementDomain &&
+      value.managementDomain === value.websiteDomain
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["websiteDomain"],
+        message: "Management and public domains must be different",
+      });
+    }
+    const sharedTenantAppUrl = process.env.TENANT_APP_URL;
+    if (value.managementDomain && sharedTenantAppUrl) {
+      try {
+        const sharedHostname = normalizeTenantHostname(
+          new URL(sharedTenantAppUrl).hostname,
+        );
+        if (sharedHostname === value.managementDomain) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["managementDomain"],
+            message: "The shared tenant app hostname cannot be assigned to one tenant",
+          });
+        }
+      } catch {
+        // Invalid deployment configuration does not weaken input validation.
+      }
+    }
+  });
+}
+
+const createSubTenantSchema = rejectDuplicateDomains(z.object({
   name: z.string().trim().min(2).max(80),
   slug: z
     .string()
     .trim()
+    .toLowerCase()
     .min(2)
     .max(60)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug must be lowercase kebab-case"),
-});
+  ...tenantDomainsSchema,
+}));
+
+const updateSubTenantSchema = rejectDuplicateDomains(z.object({
+  name: z.string().trim().min(2).max(80),
+  slug: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(2)
+    .max(60)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Slug must be lowercase kebab-case"),
+  ...tenantDomainsSchema,
+  localDevelopmentHostname: localDevelopmentHostnameSchema,
+}));
 
 const namePart = z.string().trim().min(1).max(60);
 const createTenantUserSchema = z.object({
@@ -45,6 +172,14 @@ function mapTenant(tenant: {
   type: TenantType;
   status: TenantStatus;
   createdAt: Date;
+  domains?: {
+    purpose: "MANAGEMENT" | "WEBSITE";
+    hostname: string | null;
+    status: TenantDomainStatus;
+    verifiedAt?: Date | null;
+  }[];
+  localDevelopmentAssignment?: { hostname: string } | null;
+  _count?: { memberships: number };
 }) {
   return {
     id: tenant.uuid,
@@ -54,12 +189,40 @@ function mapTenant(tenant: {
     type: tenant.type,
     status: tenant.status,
     createdAt: tenant.createdAt.toISOString(),
+    managementDomain:
+      tenant.domains?.find((domain) => domain.purpose === "MANAGEMENT")
+        ?.hostname ?? null,
+    websiteDomain:
+      tenant.domains?.find((domain) => domain.purpose === "WEBSITE")?.hostname ??
+      null,
+    managementDomainStatus:
+      tenant.domains === undefined
+        ? null
+        : tenant.domains.find((domain) => domain.purpose === "MANAGEMENT")?.status ?? TenantDomainStatus.DISABLED,
+    websiteDomainStatus:
+      tenant.domains === undefined
+        ? null
+        : tenant.domains.find((domain) => domain.purpose === "WEBSITE")?.status ?? TenantDomainStatus.DISABLED,
+    managementDomainVerifiedAt:
+      tenant.domains?.find((domain) => domain.purpose === "MANAGEMENT")?.verifiedAt?.toISOString() ?? null,
+    websiteDomainVerifiedAt:
+      tenant.domains?.find((domain) => domain.purpose === "WEBSITE")?.verifiedAt?.toISOString() ?? null,
+    localDevelopmentHostname: tenant.localDevelopmentAssignment?.hostname ?? null,
+    userCount: tenant._count?.memberships ?? 0,
   };
 }
 
 async function requireSuperAdmin(session: SessionPayload) {
   if (session.role !== "SUPERADMIN") {
     throw forbidden("SuperAdmin only");
+  }
+}
+
+async function requireMainSuperAdmin(session: SessionPayload) {
+  await requireSuperAdmin(session);
+  const mainTenant = await getMainTenant();
+  if (session.tenantId !== mainTenant.uuid) {
+    throw forbidden("SuperAdmin must use the Main Tenant session");
   }
 }
 
@@ -71,7 +234,12 @@ async function requireTenantAdmin(session: SessionPayload) {
 
 export async function createSubTenant(
   session: SessionPayload,
-  input: { name: string; slug: string },
+  input: {
+    name: string;
+    slug: string;
+    managementDomain?: string | null;
+    websiteDomain?: string | null;
+  },
 ) {
   await requireSuperAdmin(session);
   const parsed = createSubTenantSchema.safeParse(input);
@@ -88,26 +256,367 @@ export async function createSubTenant(
     throw validationError("Slug already exists");
   }
 
-  const tenant = await prisma.tenant.create({
-    data: {
-      type: TenantType.SUB,
-      parentTenantUuid: mainTenant.uuid,
-      name: parsed.data.name,
-      slug: parsed.data.slug,
-      status: TenantStatus.ACTIVE,
+  try {
+    const tenant = await prisma.$transaction(async (tx) => {
+      const created = await tx.tenant.create({
+        data: {
+          type: TenantType.SUB,
+          parentTenantUuid: mainTenant.uuid,
+          name: parsed.data.name,
+          slug: parsed.data.slug,
+          status: TenantStatus.ACTIVE,
+        },
+      });
+      await syncTenantDomains(tx, {
+        tenantUuid: created.uuid,
+        managementDomain: parsed.data.managementDomain ?? null,
+        websiteDomain: parsed.data.websiteDomain ?? null,
+      });
+      const domains = await tx.tenantDomain.findMany({
+        where: { tenantUuid: created.uuid },
+        select: { purpose: true, hostname: true, status: true, verifiedAt: true },
+      });
+      await writeAuthAudit(
+        {
+          action: "SUB_TENANT_CREATED",
+          actorUserUuid: session.userId,
+          tenantUuid: session.tenantId,
+          targetType: "tenant",
+          targetUuid: created.uuid,
+          metadata: {
+            slug: created.slug,
+            name: created.name,
+            managementDomain: parsed.data.managementDomain ?? null,
+            websiteDomain: parsed.data.websiteDomain ?? null,
+          },
+        },
+        tx,
+      );
+      return { tenant: created, domains };
+    });
+    return mapTenant({
+      ...tenant.tenant,
+      domains: tenant.domains,
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw validationError("Tenant slug or domain is already in use");
+    }
+    throw error;
+  }
+}
+
+export async function getSubTenant(session: SessionPayload, tenantId: string) {
+  await requireSuperAdmin(session);
+  const tenant = await prisma.tenant.findFirst({
+    where: { uuid: tenantId, type: TenantType.SUB, deletedAt: null },
+    select: {
+      uuid: true,
+      name: true,
+      slug: true,
+      type: true,
+      status: true,
+      createdAt: true,
+      domains: {
+        select: { purpose: true, hostname: true, status: true, verifiedAt: true },
+      },
+      localDevelopmentAssignment: { select: { hostname: true } },
+      _count: {
+        select: {
+          memberships: {
+            where: {
+              status: MembershipStatus.ACTIVE,
+              user: { deletedAt: null },
+            },
+          },
+        },
+      },
     },
   });
-
-  await writeAuthAudit({
-    action: "SUB_TENANT_CREATED",
-    actorUserUuid: session.userId,
-    tenantUuid: session.tenantId,
-    targetType: "tenant",
-    targetUuid: tenant.uuid,
-    metadata: { slug: tenant.slug, name: tenant.name },
-  });
-
+  if (!tenant) throw validationError("Sub-tenant not found");
   return mapTenant(tenant);
+}
+
+export async function updateSubTenant(
+  session: SessionPayload,
+  tenantId: string,
+  input: {
+    name: string;
+    slug: string;
+    managementDomain?: string | null;
+    websiteDomain?: string | null;
+    localDevelopmentHostname?: string | null;
+  },
+) {
+  await requireSuperAdmin(session);
+  const parsed = updateSubTenantSchema.safeParse(input);
+  if (!parsed.success) {
+    throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
+  }
+
+  const current = await prisma.tenant.findFirst({
+    where: { uuid: tenantId, type: TenantType.SUB, deletedAt: null },
+    select: {
+      uuid: true,
+      name: true,
+      slug: true,
+      domains: {
+        select: { purpose: true, hostname: true, status: true, verifiedAt: true },
+      },
+      localDevelopmentAssignment: { select: { hostname: true } },
+    },
+  });
+  if (!current) throw validationError("Sub-tenant not found");
+
+  const managementDomain =
+    parsed.data.managementDomain ??
+    (parsed.data.managementDomain === null
+      ? null
+      : current.domains.find(
+          (domain) => domain.purpose === "MANAGEMENT" && domain.status !== TenantDomainStatus.DISABLED,
+        )?.hostname ?? null);
+  const websiteDomain =
+    parsed.data.websiteDomain ??
+    (parsed.data.websiteDomain === null
+      ? null
+      : current.domains.find(
+          (domain) => domain.purpose === "WEBSITE" && domain.status !== TenantDomainStatus.DISABLED,
+        )?.hostname ?? null);
+  const localDevelopmentHostname =
+    parsed.data.localDevelopmentHostname ??
+    (parsed.data.localDevelopmentHostname === null
+      ? null
+      : current.localDevelopmentAssignment?.hostname ?? null);
+
+  try {
+    const updated = await prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.update({
+        where: { uuid: current.uuid },
+        data: {
+          name: parsed.data.name,
+          slug: parsed.data.slug,
+        },
+      });
+      await syncTenantDomains(tx, {
+        tenantUuid: current.uuid,
+        managementDomain,
+        websiteDomain,
+      });
+      await setLocalDevelopmentAssignment(
+        tx,
+        current.uuid,
+        localDevelopmentHostname,
+      );
+      const domains = await tx.tenantDomain.findMany({
+        where: { tenantUuid: current.uuid },
+        select: { purpose: true, hostname: true, status: true, verifiedAt: true },
+      });
+      const localDevelopmentAssignment = await tx.localDevelopmentTenant.findUnique({
+        where: { tenantUuid: current.uuid },
+        select: { hostname: true },
+      });
+      await writeAuthAudit(
+        {
+          action: "SUB_TENANT_UPDATED",
+          actorUserUuid: session.userId,
+          tenantUuid: session.tenantId,
+          targetType: "tenant",
+          targetUuid: tenant.uuid,
+          metadata: {
+            name: tenant.name,
+            slug: tenant.slug,
+            managementDomain,
+            websiteDomain,
+            localDevelopmentHostname,
+          },
+        },
+        tx,
+      );
+      return { tenant, domains, localDevelopmentAssignment };
+    });
+    return mapTenant({
+      ...updated.tenant,
+      domains: updated.domains,
+      localDevelopmentAssignment: updated.localDevelopmentAssignment,
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw validationError("Tenant slug or domain is already in use");
+    }
+    throw error;
+  }
+}
+
+export async function resolveSubTenantByHostname(
+  hostname: string,
+  purpose: TenantDomainPurpose,
+) {
+  const tenant = await findActiveTenantByHostname(hostname, purpose);
+  if (!tenant) return null;
+  const managementDomain =
+    tenant.domains.find((domain) => domain.purpose === "MANAGEMENT" && domain.status === TenantDomainStatus.ACTIVE)?.hostname ?? null;
+  const websiteDomain =
+    tenant.domains.find((domain) => domain.purpose === "WEBSITE" && domain.status === TenantDomainStatus.ACTIVE)?.hostname ?? null;
+  return {
+    id: tenant.uuid,
+    name: tenant.name,
+    slug: tenant.slug,
+    type: tenant.type,
+    status: tenant.status,
+    managementDomain,
+    websiteDomain,
+  };
+}
+
+export async function resolveSubTenantBySlug(slug: string) {
+  const tenant = await findActiveTenantBySlug(slug);
+  if (!tenant || tenant.type !== TenantType.SUB) return null;
+  return { id: tenant.uuid, name: tenant.name, slug: tenant.slug };
+}
+
+export async function resolveSubTenantById(id: string) {
+  const tenant = await findActiveTenantById(id);
+  if (!tenant || tenant.type !== TenantType.SUB) return null;
+  return { id: tenant.uuid, name: tenant.name, slug: tenant.slug };
+}
+
+async function findSubTenantDomain(tenantId: string, purpose: TenantDomainPurpose) {
+  const tenant = await prisma.tenant.findFirst({
+    where: { uuid: tenantId, type: TenantType.SUB, deletedAt: null },
+    select: {
+      uuid: true,
+      domains: {
+        where: { purpose },
+        select: { uuid: true, purpose: true, hostname: true, status: true, verifiedAt: true, verificationToken: true },
+        take: 1,
+      },
+    },
+  });
+  const domain = tenant?.domains[0];
+  if (!tenant || !domain || !domain.hostname) throw validationError("Tenant domain is not configured");
+  return { tenant, domain: { ...domain, hostname: domain.hostname } };
+}
+
+export async function startTenantDomainVerification(
+  session: SessionPayload,
+  tenantId: string,
+  purpose: TenantDomainPurpose,
+) {
+  await requireMainSuperAdmin(session);
+  const parsed = z.object({ tenantId: z.string().uuid(), purpose: z.nativeEnum(TenantDomainPurpose) })
+    .safeParse({ tenantId, purpose });
+  if (!parsed.success) throw validationError("Invalid tenant domain");
+  const { tenant, domain } = await findSubTenantDomain(parsed.data.tenantId, parsed.data.purpose);
+  if (domain.status === TenantDomainStatus.ACTIVE) throw validationError("This domain is already active");
+  const token = createDomainVerificationToken();
+  await prisma.$transaction(async (tx) => {
+    const transition = await tx.tenantDomain.updateMany({
+      where: { uuid: domain.uuid, hostname: domain.hostname, status: { not: TenantDomainStatus.ACTIVE } },
+      data: { status: TenantDomainStatus.PENDING_VERIFICATION, verifiedAt: null, verificationToken: token },
+    });
+    if (transition.count !== 1) throw validationError("Domain configuration changed; open setup again");
+    await writeAuthAudit({
+      action: "TENANT_DOMAIN_VERIFICATION_STARTED",
+      actorUserUuid: session.userId,
+      tenantUuid: session.tenantId,
+      targetType: "tenant",
+      targetUuid: tenant.uuid,
+      metadata: { purpose: domain.purpose, hostname: domain.hostname },
+    }, tx);
+  });
+  return {
+    purpose: domain.purpose,
+    hostname: domain.hostname,
+    status: TenantDomainStatus.PENDING_VERIFICATION,
+    verifiedAt: null,
+    recordName: domainVerificationRecordName(domain.hostname),
+    recordValue: `cube-core-verification=${token}`,
+  };
+}
+
+export async function checkTenantDomainVerification(
+  session: SessionPayload,
+  tenantId: string,
+  purpose: TenantDomainPurpose,
+) {
+  await requireMainSuperAdmin(session);
+  const parsed = z.object({ tenantId: z.string().uuid(), purpose: z.nativeEnum(TenantDomainPurpose) })
+    .safeParse({ tenantId, purpose });
+  if (!parsed.success) throw validationError("Invalid tenant domain");
+  const { tenant, domain } = await findSubTenantDomain(parsed.data.tenantId, parsed.data.purpose);
+  if (domain.status === TenantDomainStatus.ACTIVE) {
+    return { purpose: domain.purpose, hostname: domain.hostname, status: domain.status, verifiedAt: domain.verifiedAt?.toISOString() ?? null };
+  }
+  const verified = domain.verificationToken
+    ? await hasDomainVerificationRecord(domain.hostname, domain.verificationToken)
+    : false;
+  if (!verified) {
+    return { purpose: domain.purpose, hostname: domain.hostname, status: domain.status, verifiedAt: null };
+  }
+  const verifiedAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    const transition = await tx.tenantDomain.updateMany({
+      where: {
+        uuid: domain.uuid,
+        hostname: domain.hostname,
+        status: TenantDomainStatus.PENDING_VERIFICATION,
+        verificationToken: domain.verificationToken,
+      },
+      data: { status: TenantDomainStatus.PENDING_DNS, verifiedAt, verificationToken: null },
+    });
+    if (transition.count !== 1) throw validationError("Domain verification changed while checking DNS; try again");
+    await writeAuthAudit({
+      action: "TENANT_DOMAIN_VERIFIED",
+      actorUserUuid: session.userId,
+      tenantUuid: session.tenantId,
+      targetType: "tenant",
+      targetUuid: tenant.uuid,
+      metadata: { purpose: domain.purpose, hostname: domain.hostname },
+    }, tx);
+  });
+  return { purpose: domain.purpose, hostname: domain.hostname, status: TenantDomainStatus.PENDING_DNS, verifiedAt: verifiedAt.toISOString() };
+}
+
+/** SuperAdmins confirm the provider's DNS, shared-app routing, and HTTPS setup after testing the custom hostname. */
+export async function activateTenantDomain(
+  session: SessionPayload,
+  tenantId: string,
+  purpose: TenantDomainPurpose,
+  confirmHttpsAndRouting: boolean,
+) {
+  await requireMainSuperAdmin(session);
+  const parsed = z.object({
+    tenantId: z.string().uuid(),
+    purpose: z.nativeEnum(TenantDomainPurpose),
+    confirmHttpsAndRouting: z.literal(true),
+  }).safeParse({ tenantId, purpose, confirmHttpsAndRouting });
+  if (!parsed.success) throw validationError("Confirm that DNS routing and HTTPS work before connecting this domain");
+  const { tenant, domain } = await findSubTenantDomain(parsed.data.tenantId, parsed.data.purpose);
+  if (domain.status !== TenantDomainStatus.PENDING_DNS || !domain.verifiedAt) {
+    throw validationError("Verify domain ownership before connecting this domain");
+  }
+  await prisma.$transaction(async (tx) => {
+    const transition = await tx.tenantDomain.updateMany({
+      where: { uuid: domain.uuid, hostname: domain.hostname, status: TenantDomainStatus.PENDING_DNS, verifiedAt: domain.verifiedAt },
+      data: { status: TenantDomainStatus.ACTIVE },
+    });
+    if (transition.count !== 1) throw validationError("Domain configuration changed; verify it again before connecting");
+    await writeAuthAudit({
+      action: "TENANT_DOMAIN_ACTIVATED",
+      actorUserUuid: session.userId,
+      tenantUuid: session.tenantId,
+      targetType: "tenant",
+      targetUuid: tenant.uuid,
+      metadata: { purpose: domain.purpose, hostname: domain.hostname },
+    }, tx);
+  });
+  return { purpose: domain.purpose, hostname: domain.hostname, status: TenantDomainStatus.ACTIVE, verifiedAt: domain.verifiedAt.toISOString() };
 }
 
 export async function setSubTenantStatus(
@@ -126,6 +635,9 @@ export async function setSubTenantStatus(
   const updated = await prisma.tenant.update({
     where: { uuid: tenant.uuid },
     data: { status: input.status },
+    include: {
+      domains: { select: { purpose: true, hostname: true, status: true, verifiedAt: true } },
+    },
   });
 
   await writeAuthAudit({
@@ -216,6 +728,7 @@ export async function createAdminUser(
       {
         userUuid: created.uuid,
         createdByUuid: session.userId,
+        tenantUuid: tenant.uuid,
         audience: "TENANT_APP",
       },
       tx,
@@ -278,6 +791,28 @@ export async function listSubTenants(
   const [items, total] = await Promise.all([
     prisma.tenant.findMany({
       where,
+      select: {
+        uuid: true,
+        name: true,
+        slug: true,
+        type: true,
+        status: true,
+        createdAt: true,
+        domains: {
+          select: { purpose: true, hostname: true, status: true, verifiedAt: true },
+        },
+        localDevelopmentAssignment: { select: { hostname: true } },
+        _count: {
+          select: {
+            memberships: {
+              where: {
+                status: MembershipStatus.ACTIVE,
+                user: { deletedAt: null },
+              },
+            },
+          },
+        },
+      },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -386,6 +921,346 @@ export async function listTenantUsers(
     page,
     pageSize,
   };
+}
+
+const managedTenantUsersInputSchema = z.object({
+  tenantId: z.string().uuid(),
+  search: z.string().trim().max(100).nullish(),
+  page: z.number().int().min(1).optional(),
+  pageSize: z.number().int().min(1).max(50).optional(),
+});
+
+function deriveActivationStatus(
+  user: {
+    status: UserStatus;
+    activatedAt: Date | null;
+    activationTokens: {
+      createdAt: Date;
+      expiresAt: Date;
+      usedAt: Date | null;
+      revokedAt: Date | null;
+    }[];
+  },
+  now: Date,
+) {
+  if (user.status === UserStatus.INACTIVE) return "DISABLED" as const;
+  if (user.activatedAt) return "ACTIVE" as const;
+  const latest = user.activationTokens[0];
+  if (
+    latest &&
+    !latest.usedAt &&
+    !latest.revokedAt &&
+    latest.expiresAt <= now
+  ) {
+    return "EXPIRED" as const;
+  }
+  return "PENDING" as const;
+}
+
+/** Main Console view of a single sub-tenant's users. */
+export async function listManagedSubTenantUsers(
+  session: SessionPayload,
+  input: { tenantId: string; search?: string | null; page?: number; pageSize?: number },
+) {
+  await requireMainSuperAdmin(session);
+  const parsed = managedTenantUsersInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
+  }
+  const tenant = await prisma.tenant.findFirst({
+    where: { uuid: parsed.data.tenantId, type: TenantType.SUB, deletedAt: null },
+    select: { uuid: true },
+  });
+  if (!tenant) throw validationError("Sub-tenant not found");
+
+  const page = parsed.data.page ?? 1;
+  const pageSize = parsed.data.pageSize ?? 10;
+  const search = parsed.data.search;
+  const where: Prisma.TenantMembershipWhereInput = {
+    tenantUuid: tenant.uuid,
+    status: MembershipStatus.ACTIVE,
+    role: { code: { in: ["ADMIN", "EDITOR"] } },
+    user: {
+      deletedAt: null,
+      ...(search
+        ? {
+            OR: [
+              { firstName: { contains: search, mode: "insensitive" } },
+              { lastName: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    },
+  };
+  const [rows, total] = await Promise.all([
+    prisma.tenantMembership.findMany({
+      where,
+      select: {
+        role: { select: { code: true } },
+        user: {
+          select: {
+            uuid: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+            status: true,
+            activatedAt: true,
+            activationTokens: {
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: {
+                createdAt: true,
+                expiresAt: true,
+                usedAt: true,
+                revokedAt: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.tenantMembership.count({ where }),
+  ]);
+  const now = new Date();
+  return {
+    items: rows.map(({ user, role }) => ({
+      id: user.uuid,
+      fullName: displayFullName(user),
+      email: user.email,
+      role: role.code,
+      accountStatus: user.status,
+      activationStatus: deriveActivationStatus(user, now),
+      activationLinkCreatedAt: user.activationTokens[0]?.createdAt.toISOString() ?? null,
+      activationLinkExpiresAt: user.activationTokens[0]?.expiresAt.toISOString() ?? null,
+    })),
+    total,
+    page,
+    pageSize,
+  };
+}
+
+/** Return a currently valid tenant activation URL only to an authorized Main SuperAdmin. */
+export async function getSubTenantUserActivationLink(
+  session: SessionPayload,
+  tenantId: string,
+  userId: string,
+) {
+  if (session.role === "SUPERADMIN") {
+    await requireMainSuperAdmin(session);
+  } else if (session.role !== "ADMIN" || session.tenantId !== tenantId) {
+    throw forbidden("You can only view activation links for users in your own tenant");
+  }
+  const parsed = z.object({ tenantId: z.string().uuid(), userId: z.string().uuid() })
+    .safeParse({ tenantId, userId });
+  if (!parsed.success) {
+    throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
+  }
+
+  const membership = await prisma.tenantMembership.findFirst({
+    where: {
+      tenantUuid: parsed.data.tenantId,
+      userUuid: parsed.data.userId,
+      status: MembershipStatus.ACTIVE,
+      role: { code: { in: ["ADMIN", "EDITOR"] } },
+      tenant: { type: TenantType.SUB, deletedAt: null },
+      user: { deletedAt: null, status: UserStatus.PENDING, activatedAt: null },
+    },
+    select: { userUuid: true },
+  });
+  if (!membership) throw validationError("Pending user not found in this sub-tenant");
+
+  const link = await getExistingActivationLink(membership.userUuid, {
+    audience: "TENANT_APP",
+    tenantUuid: parsed.data.tenantId,
+  });
+  if (!link) return null;
+
+  await writeAuthAudit({
+    action: "auth.activation.link_viewed",
+    actorUserUuid: session.userId,
+    tenantUuid: parsed.data.tenantId,
+    targetType: "user",
+    targetUuid: membership.userUuid,
+    metadata: { audience: "TENANT_APP" },
+  });
+  return link;
+}
+
+/** Return the current valid activation link for a tenant Admin's managed user. */
+export async function getTenantUserActivationLink(
+  session: SessionPayload,
+  userId: string,
+) {
+  await requireTenantAdminTarget(session, userId);
+  return getSubTenantUserActivationLink(session, session.tenantId, userId);
+}
+
+/** Regenerate a pending sub-tenant user's link; the row lock serializes concurrent requests. */
+export async function regenerateSubTenantUserActivationLink(
+  session: SessionPayload,
+  tenantId: string,
+  userId: string,
+) {
+  if (session.role !== "SUPERADMIN" && session.role !== "ADMIN") {
+    throw forbidden("Only an authorized administrator can regenerate activation links");
+  }
+  const parsed = z.object({ tenantId: z.string().uuid(), userId: z.string().uuid() })
+    .safeParse({ tenantId, userId });
+  if (!parsed.success) {
+    throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
+  }
+  if (session.role === "ADMIN" && parsed.data.tenantId !== session.tenantId) {
+    throw forbidden("You can only manage users in your own tenant");
+  }
+
+  const activation = await prisma.$transaction(async (tx) => {
+    // Serializes re-issues for this account so only the final link remains valid.
+    await tx.$queryRaw<Array<{ uuid: string }>>(
+      Prisma.sql`SELECT uuid FROM users WHERE uuid = ${parsed.data.userId} FOR UPDATE`,
+    );
+    const membership = await tx.tenantMembership.findFirst({
+      where: {
+        tenantUuid: parsed.data.tenantId,
+        userUuid: parsed.data.userId,
+        status: MembershipStatus.ACTIVE,
+        role: { code: { in: ["ADMIN", "EDITOR"] } },
+        tenant: { type: TenantType.SUB, deletedAt: null },
+        user: { deletedAt: null },
+      },
+      select: {
+        user: { select: { uuid: true, status: true, activatedAt: true } },
+      },
+    });
+    if (!membership) throw validationError("User not found in this sub-tenant");
+    if (
+      membership.user.status !== UserStatus.PENDING ||
+      membership.user.activatedAt
+    ) {
+      throw validationError(
+        "Activation links can only be regenerated for pending accounts. Use password reset for active accounts or re-enable disabled accounts first.",
+      );
+    }
+
+    const link = await createActivationToken(
+      {
+        userUuid: membership.user.uuid,
+        createdByUuid: session.userId,
+        tenantUuid: parsed.data.tenantId,
+        audience: "TENANT_APP",
+      },
+      tx,
+    );
+    await writeAuthAudit(
+      {
+        action: "auth.activation.link_regenerated",
+        actorUserUuid: session.userId,
+        tenantUuid: parsed.data.tenantId,
+        targetType: "user",
+        targetUuid: membership.user.uuid,
+        metadata: { audience: "TENANT_APP" },
+      },
+      tx,
+    );
+    return link;
+  });
+
+  const account = await findAccountByUuid(userId, tenantId);
+  if (!account) throw validationError("User not found");
+  return {
+    ...activation,
+    user: {
+      ...mapAuthUser(account),
+      createdAt: null,
+      lastLoginAt: null,
+      totpEnabled: false,
+    },
+  };
+}
+
+export async function generateTenantUserActivationLink(session: SessionPayload, userId: string) {
+  await requireTenantAdminTarget(session, userId);
+  return regenerateSubTenantUserActivationLink(session, session.tenantId, userId);
+}
+
+const tenantUserUpdateSchema = z.object({
+  email: z.string().trim().email().max(254).optional(),
+  firstName: z.string().trim().min(1).max(60).optional(),
+  lastName: z.string().trim().min(1).max(60).optional(),
+  role: z.enum(["ADMIN", "EDITOR"]).optional(),
+  status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+});
+
+async function requireTenantAdminTarget(session: SessionPayload, userId: string) {
+  if (session.role !== "ADMIN") throw forbidden("Only tenant Admins can manage users");
+  const membership = await prisma.tenantMembership.findFirst({
+    where: { tenantUuid: session.tenantId, userUuid: userId, status: MembershipStatus.ACTIVE, role: { code: { in: ["ADMIN", "EDITOR"] } }, user: { deletedAt: null } },
+    select: { uuid: true, userUuid: true, role: { select: { code: true } }, user: { select: { status: true, email: true } } },
+  });
+  if (!membership) throw validationError("User not found");
+  if (membership.userUuid === session.userId) throw validationError("You cannot change your own tenant access");
+  return membership;
+}
+
+export async function updateTenantUser(session: SessionPayload, userId: string, input: unknown) {
+  const parsed = tenantUserUpdateSchema.safeParse(input);
+  if (!parsed.success) throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
+  if (userId === session.userId) {
+    if (session.role !== "ADMIN") {
+      throw forbidden("Only tenant Admins can manage users");
+    }
+    const ownMembership = await prisma.tenantMembership.findFirst({
+      where: {
+        tenantUuid: session.tenantId,
+        userUuid: session.userId,
+        status: MembershipStatus.ACTIVE,
+        role: { code: "ADMIN" },
+        tenant: { type: TenantType.SUB },
+        user: { deletedAt: null, status: UserStatus.ACTIVE },
+      },
+      select: { uuid: true },
+    });
+    if (!ownMembership) throw forbidden("You do not have access to manage this tenant");
+    if (parsed.data.role || parsed.data.status) {
+      throw validationError("You cannot change your own role or account status");
+    }
+    if (parsed.data.email) {
+      const email = parsed.data.email.toLowerCase();
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing && existing.uuid !== session.userId) throw validationError("Email already in use");
+    }
+    await prisma.user.update({ where: { uuid: session.userId }, data: { ...(parsed.data.email ? { email: parsed.data.email.toLowerCase() } : {}), ...(parsed.data.firstName ? { firstName: parsed.data.firstName } : {}), ...(parsed.data.lastName ? { lastName: parsed.data.lastName } : {}) } });
+    await writeAuthAudit({ action: "TENANT_USER_UPDATED", actorUserUuid: session.userId, tenantUuid: session.tenantId, targetType: "user", targetUuid: session.userId, metadata: { changed: Object.keys(parsed.data), selfServiceProfile: true } });
+    const account = await findAccountByUuid(session.userId, session.tenantId);
+    if (!account) throw validationError("User not found");
+    return { ...mapAuthUser(account), createdAt: null, lastLoginAt: null, totpEnabled: Boolean(account.totpEnabledAt) };
+  }
+  const membership = await requireTenantAdminTarget(session, userId);
+  if (parsed.data.email && parsed.data.email.toLowerCase() !== membership.user.email) {
+    const exists = await prisma.user.findUnique({ where: { email: parsed.data.email.toLowerCase() } });
+    if (exists) throw validationError("Email already in use");
+  }
+  if (membership.role.code === "ADMIN" && (parsed.data.role === "EDITOR" || parsed.data.status === "INACTIVE")) {
+    const activeAdmins = await prisma.tenantMembership.count({ where: { tenantUuid: session.tenantId, status: MembershipStatus.ACTIVE, role: { code: "ADMIN" }, user: { status: UserStatus.ACTIVE, deletedAt: null } } });
+    if (membership.user.status === UserStatus.ACTIVE && activeAdmins <= 1) throw validationError("Cannot remove the last active tenant Admin");
+  }
+  await prisma.$transaction(async (tx) => {
+    if (parsed.data.role) await tx.tenantMembership.update({ where: { uuid: membership.uuid }, data: { roleUuid: await getRoleUuid(parsed.data.role) } });
+    await tx.user.update({ where: { uuid: userId }, data: { ...(parsed.data.email ? { email: parsed.data.email.toLowerCase() } : {}), ...(parsed.data.firstName ? { firstName: parsed.data.firstName } : {}), ...(parsed.data.lastName ? { lastName: parsed.data.lastName } : {}), ...(parsed.data.status ? { status: parsed.data.status as UserStatus } : {}) } });
+    if (parsed.data.status === "INACTIVE") await tx.userSession.updateMany({ where: { userUuid: userId, tenantUuid: session.tenantId, revokedAt: null }, data: { revokedAt: new Date() } });
+  });
+  await writeAuthAudit({ action: "TENANT_USER_UPDATED", actorUserUuid: session.userId, tenantUuid: session.tenantId, targetType: "user", targetUuid: userId, metadata: { changed: Object.keys(parsed.data) } });
+  const account = await findAccountByUuid(userId, session.tenantId);
+  if (!account) throw validationError("User not found");
+  return { ...mapAuthUser(account), createdAt: null, lastLoginAt: null, totpEnabled: Boolean(account.totpEnabledAt) };
+}
+
+export async function generateTenantUserPasswordResetLink(session: SessionPayload, userId: string) {
+  await requireTenantAdminTarget(session, userId);
+  return generateSubTenantUserPasswordResetLink(session, userId);
 }
 
 /** Remove a user's access from the current sub-tenant without hard-deleting identity data. */

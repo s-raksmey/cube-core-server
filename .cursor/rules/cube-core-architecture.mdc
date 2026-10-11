@@ -79,6 +79,7 @@ prisma/schema.prisma
 - Tenant app: strictly one sub-tenant scope; reject SuperAdmin at login
 - Run `npm run graphql:codegen` in each frontend after SDL or operation document changes
 - Website GraphQL is public-read only; never add privileged mutations
+- Tenant domains map normalized unique MANAGEMENT / WEBSITE hostnames to the stable tenant UUID. Only verified `ACTIVE` mappings route production traffic; saved domains remain pending until ownership and hosting/HTTPS setup are complete. `tenantByHostname` is public identity resolution only; never use hostname as authentication or authorization. Local development uses one server-managed `localhost` assignment, stored separately from production domains; it selects the tenant for shared ports 3001 and 3002 and must never be supplied by a URL parameter or environment UUID. Trust forwarded host headers only from explicitly trusted infrastructure.
 - Admin / tenant / website use Next.js `src/` layout (`src/app`, `src/components`, `src/lib`, …)
 - Admin/tenant/website GraphQL docs: `src/graphql/*.gql` + `src/lib/apollo`; run `npm run graphql:codegen` after server SDL changes
 

@@ -168,6 +168,19 @@ SuperAdmin form in admin UI
   → UI refreshes tenant list
 ```
 
+### Tenant domain resolution
+
+```text
+Management or public website hostname
+  → public tenantByHostname(hostname, purpose) GraphQL query
+  → normalize hostname and resolve an active MANAGEMENT or WEBSITE mapping
+  → return only active SUB tenant identity/configuration
+  → use the tenant UUID for subsequent data operations
+  → each protected operation still checks session role + tenant membership
+```
+
+`tenant_domains` maps a tenant UUID and purpose (`MANAGEMENT` or `WEBSITE`) to a normalized unique hostname. Hostname resolution is identification only; it is never authentication or authorization. Production resolves only verified active domain mappings. Local development stores a single `localhost` assignment in `local_development_tenants`, separate from production domains. SuperAdmin can move that assignment atomically between sub-tenants; shared ports 3001 and 3002 then resolve the same assigned tenant without a URL UUID, slug, or per-tenant environment variable. The tenant app still scopes login to the resolved tenant and checks membership, role, status, and audience before issuing a challenge. The public website resolves its `WEBSITE` hostname on each request and disables shared caching for the tenant lookup. Forwarded host headers are not trusted; apps read the incoming `Host` and reverse proxies must preserve it while stripping client-supplied forwarding headers.
+
 ### Admin manages users in own tenant
 
 ```text
@@ -190,6 +203,7 @@ The admin and tenant BFFs must validate same-origin requests, accept JSON only, 
 - `platformDashboard` (SuperAdmin / `ADMIN_CONSOLE`)
 - `tenantDashboard` (sub-tenant session only)
 - `subTenants` (SuperAdmin)
+- `subTenant` (SuperAdmin), `tenantByHostname` (public identity lookup only)
 - `mainTenantUsers` / `mainTenantUser` (SuperAdmin — MAIN SUPERADMIN memberships)
 - `tenantUsers` (sub-tenant scoped)
 - `validateActivationToken` / `validatePasswordResetToken`

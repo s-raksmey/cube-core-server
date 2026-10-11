@@ -17,6 +17,19 @@ enum TenantStatus {
   SUSPENDED
 }
 
+enum TenantDomainPurpose {
+  MANAGEMENT
+  WEBSITE
+}
+
+enum TenantDomainStatus {
+  PENDING_VERIFICATION
+  PENDING_DNS
+  ACTIVE
+  ERROR
+  DISABLED
+}
+
 enum UserStatus {
   PENDING
   ACTIVE
@@ -48,6 +61,8 @@ model Tenant {
   parentTenantUuid String?              @map("parent_tenant_uuid")
   parentTenant     Tenant?              @relation("TenantHierarchy", fields: [parentTenantUuid], references: [uuid])
   childTenants     Tenant[]             @relation("TenantHierarchy")
+  domains          TenantDomain[]
+  localDevelopmentAssignment LocalDevelopmentTenant?
   status           TenantStatus         @default(ACTIVE)
   settings         Json                 @default("{}")
   memberships      TenantMembership[]
@@ -61,6 +76,34 @@ model Tenant {
   @@index([parentTenantUuid])
   @@index([type, status])
   @@map("tenants")
+}
+
+model TenantDomain {
+  uuid              String             @id @default(uuid()) @map("uuid")
+  tenantUuid        String             @map("tenant_uuid")
+  tenant            Tenant             @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  purpose           TenantDomainPurpose
+  hostname          String?            @unique
+  status            TenantDomainStatus @default(PENDING_VERIFICATION)
+  verifiedAt        DateTime?          @map("verified_at")
+  verificationToken String?            @map("verification_token")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  @@unique([tenantUuid, purpose])
+  @@map("tenant_domains")
+}
+
+/// The single local routing selection. This is intentionally separate from
+/// verified production domain mappings and is only used by local development.
+model LocalDevelopmentTenant {
+  hostname  String   @id
+  tenantUuid String  @unique @map("tenant_uuid")
+  tenant    Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("local_development_tenants")
 }
 
 model Role {

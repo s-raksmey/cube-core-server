@@ -110,6 +110,7 @@ async function loadFromMembership(
 
 export async function findAccountByEmailOrUsername(
   identifier: string,
+  tenantUuid?: string,
 ): Promise<LoadedAccount | null> {
   const normalized = identifier.trim().toLowerCase();
   const user = await prisma.user.findFirst({
@@ -119,7 +120,7 @@ export async function findAccountByEmailOrUsername(
     },
   });
   if (!user) return null;
-  return loadFromMembership(user.uuid);
+  return loadFromMembership(user.uuid, tenantUuid);
 }
 
 export async function findAccountByUuid(
