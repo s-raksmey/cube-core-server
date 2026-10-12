@@ -7,7 +7,7 @@
 | Main | `cube-core-admin` | `ADMIN_CONSOLE` | `management_console_admin_session` |
 | Sub-tenant | `cube-core-tenant` | `TENANT_APP` | `management_console_tenant_session` |
 
-Access tokens (5m) use `management_console_*_access` cookies. Refresh tokens last 30 days and rotate on each refresh. Cookies are HttpOnly, `SameSite=Lax`, and scoped per console — never shared.
+Access tokens (5m) use `management_console_*_access` cookies. Refresh tokens last 30 days and rotate on each refresh. Main Console and tenant workspace sessions also have a server-enforced one-hour inactivity timeout; activity updates the session's `lastUsedAt`, and an idle session is revoked. Cookies are HttpOnly, `SameSite=Lax`, and scoped per console — never shared.
 
 ## Authorization
 

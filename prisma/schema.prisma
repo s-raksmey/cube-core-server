@@ -112,10 +112,23 @@ model Role {
   name        String
   description String?
   memberships TenantMembership[]
+  permissions RolePermission[]
   createdAt   DateTime           @default(now()) @map("created_at")
   updatedAt   DateTime           @updatedAt @map("updated_at")
 
   @@map("roles")
+}
+
+model RolePermission {
+  uuid       String   @id @default(uuid()) @map("uuid")
+  roleUuid   String   @map("role_uuid")
+  role       Role     @relation(fields: [roleUuid], references: [uuid], onDelete: Cascade)
+  permission String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([roleUuid, permission])
+  @@index([permission])
+  @@map("role_permissions")
 }
 
 model User {

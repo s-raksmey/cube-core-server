@@ -1,27 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 /**
- * Documents the permission matrix for sub-tenant user management.
- * Server enforcement lives in createAdminUser / listTenantUsers.
+ * Documents the configurable permission matrix for sub-tenant user management.
+ * Server enforcement lives in the tenant service permission checks.
  */
 describe("sub-tenant user management matrix", () => {
-  const canInviteUsers = (role: string) =>
-    role === "ADMIN" || role === "SUPERADMIN";
-  const canListUsers = (role: string) =>
-    role === "ADMIN" ||
-    role === "EDITOR" ||
-    role === "SUPERADMIN";
+  const canInviteUsers = (permissions: string[]) =>
+    permissions.includes("USERS_CREATE");
+  const canListUsers = (permissions: string[]) =>
+    permissions.includes("USERS_VIEW");
   const allowedInviteRoles = ["ADMIN", "EDITOR"] as const;
 
-  it("only Admin (and SuperAdmin remote) may invite users", () => {
-    expect(canInviteUsers("ADMIN")).toBe(true);
-    expect(canInviteUsers("EDITOR")).toBe(false);
-    expect(canInviteUsers("AUTHOR")).toBe(false);
+  it("allows either tenant role to invite when Create users is granted", () => {
+    expect(canInviteUsers(["USERS_VIEW", "USERS_CREATE"])).toBe(true);
+    expect(canInviteUsers(["USERS_VIEW"])).toBe(false);
   });
 
-  it("Editor may list but not invite", () => {
-    expect(canListUsers("EDITOR")).toBe(true);
-    expect(canInviteUsers("EDITOR")).toBe(false);
+  it("requires View users before the role can open the Users screen", () => {
+    expect(canListUsers(["USERS_VIEW", "USERS_CREATE"])).toBe(true);
+    expect(canListUsers(["USERS_CREATE"])).toBe(false);
   });
 
   it("invite roles are only ADMIN and EDITOR", () => {

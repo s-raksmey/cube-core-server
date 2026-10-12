@@ -13,6 +13,8 @@ export const ACCESS_COOKIE_BY_AUDIENCE: Record<AuthAudience, string> = {
 
 export const ACCESS_TOKEN_TTL = "5m";
 export const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/** Main and tenant console sessions expire after this much inactivity. */
+export const CONSOLE_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 /** Pre-auth challenge (password → 2FA). Must cover QR scan + code entry. */
 export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 /** Pending TOTP secret before first verified code. Keep aligned with challenge TTL. */

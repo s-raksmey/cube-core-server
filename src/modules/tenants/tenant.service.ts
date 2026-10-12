@@ -38,6 +38,7 @@ import {
   mapAuthUser,
   findAccountByUuid,
 } from "@/src/modules/users/account";
+import { requireTenantUserPermission, type TenantUserPermission } from "@/src/modules/roles/role-permission.service";
 
 function optionalHostname() {
   return z.preprocess(
@@ -685,9 +686,16 @@ export async function createAdminUser(
     if (!parsed.data.tenantId) {
       throw validationError("tenantId is required");
     }
+    await requireTenantUserPermission(session, "USERS_CREATE");
+    if (parsed.data.role !== "EDITOR") {
+      await requireTenantUserPermission(session, "USERS_CHANGE_ROLE");
+    }
     tenantUuid = parsed.data.tenantId;
   } else {
-    await requireTenantAdmin(session);
+    await requireTenantUserPermission(session, "USERS_CREATE");
+    if (parsed.data.role !== "EDITOR") {
+      await requireTenantUserPermission(session, "USERS_CHANGE_ROLE");
+    }
     tenantUuid = session.tenantId;
   }
 
@@ -832,13 +840,7 @@ export async function listTenantUsers(
   session: SessionPayload,
   input?: { search?: string; page?: number; pageSize?: number },
 ) {
-  if (
-    session.role !== "ADMIN" &&
-    session.role !== "EDITOR" &&
-    session.role !== "SUPERADMIN"
-  ) {
-    throw forbidden();
-  }
+  await requireTenantUserPermission(session, "USERS_VIEW");
 
   const page = Math.max(1, input?.page ?? 1);
   const pageSize = Math.min(50, Math.max(1, input?.pageSize ?? 10));
@@ -846,7 +848,7 @@ export async function listTenantUsers(
 
   const where: Prisma.TenantMembershipWhereInput = {
     tenantUuid: session.tenantId,
-    status: MembershipStatus.ACTIVE,
+    status: { in: [MembershipStatus.ACTIVE, MembershipStatus.DISABLED] },
     role: { code: { in: ["ADMIN", "EDITOR"] } },
     user: {
       deletedAt: null,
@@ -867,6 +869,7 @@ export async function listTenantUsers(
     prisma.tenantMembership.findMany({
       where,
       select: {
+        status: true,
         user: {
           select: {
             uuid: true,
@@ -911,6 +914,7 @@ export async function listTenantUsers(
       type: "SUB" as const,
       role: row.role.code,
       status: row.user.status,
+      membershipStatus: row.status,
       tenantId: row.tenant.uuid,
       tenant: mapTenant(row.tenant),
       createdAt: row.user.createdAt.toISOString(),
@@ -963,6 +967,7 @@ export async function listManagedSubTenantUsers(
   input: { tenantId: string; search?: string | null; page?: number; pageSize?: number },
 ) {
   await requireMainSuperAdmin(session);
+  await requireTenantUserPermission(session, "USERS_VIEW");
   const parsed = managedTenantUsersInputSchema.safeParse(input);
   if (!parsed.success) {
     throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
@@ -978,7 +983,7 @@ export async function listManagedSubTenantUsers(
   const search = parsed.data.search;
   const where: Prisma.TenantMembershipWhereInput = {
     tenantUuid: tenant.uuid,
-    status: MembershipStatus.ACTIVE,
+    status: { in: [MembershipStatus.ACTIVE, MembershipStatus.DISABLED] },
     role: { code: { in: ["ADMIN", "EDITOR"] } },
     user: {
       deletedAt: null,
@@ -997,6 +1002,7 @@ export async function listManagedSubTenantUsers(
     prisma.tenantMembership.findMany({
       where,
       select: {
+        status: true,
         role: { select: { code: true } },
         user: {
           select: {
@@ -1004,6 +1010,7 @@ export async function listManagedSubTenantUsers(
             email: true,
             firstName: true,
             lastName: true,
+            username: true,
             status: true,
             activatedAt: true,
             activationTokens: {
@@ -1027,12 +1034,16 @@ export async function listManagedSubTenantUsers(
   ]);
   const now = new Date();
   return {
-    items: rows.map(({ user, role }) => ({
+    items: rows.map(({ user, role, status }) => ({
       id: user.uuid,
       fullName: displayFullName(user),
+      firstName: user.firstName,
+      lastName: user.lastName,
+      username: user.username,
       email: user.email,
       role: role.code,
       accountStatus: user.status,
+      membershipStatus: status,
       activationStatus: deriveActivationStatus(user, now),
       activationLinkCreatedAt: user.activationTokens[0]?.createdAt.toISOString() ?? null,
       activationLinkExpiresAt: user.activationTokens[0]?.expiresAt.toISOString() ?? null,
@@ -1051,8 +1062,12 @@ export async function getSubTenantUserActivationLink(
 ) {
   if (session.role === "SUPERADMIN") {
     await requireMainSuperAdmin(session);
-  } else if (session.role !== "ADMIN" || session.tenantId !== tenantId) {
-    throw forbidden("You can only view activation links for users in your own tenant");
+    await requireTenantUserPermission(session, "USERS_ACTIVATE");
+  } else {
+    if (session.audience !== "TENANT_APP" || session.tenantId !== tenantId) {
+      throw forbidden("You can only view activation links for users in your own tenant");
+    }
+    await requireTenantUserPermission(session, "USERS_ACTIVATE");
   }
   const parsed = z.object({ tenantId: z.string().uuid(), userId: z.string().uuid() })
     .safeParse({ tenantId, userId });
@@ -1095,7 +1110,7 @@ export async function getTenantUserActivationLink(
   session: SessionPayload,
   userId: string,
 ) {
-  await requireTenantAdminTarget(session, userId);
+  await requireTenantAdminTarget(session, userId, "USERS_ACTIVATE");
   return getSubTenantUserActivationLink(session, session.tenantId, userId);
 }
 
@@ -1105,16 +1120,22 @@ export async function regenerateSubTenantUserActivationLink(
   tenantId: string,
   userId: string,
 ) {
-  if (session.role !== "SUPERADMIN" && session.role !== "ADMIN") {
-    throw forbidden("Only an authorized administrator can regenerate activation links");
-  }
   const parsed = z.object({ tenantId: z.string().uuid(), userId: z.string().uuid() })
     .safeParse({ tenantId, userId });
   if (!parsed.success) {
     throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
   }
-  if (session.role === "ADMIN" && parsed.data.tenantId !== session.tenantId) {
-    throw forbidden("You can only manage users in your own tenant");
+  if (session.role === "SUPERADMIN") {
+    await requireMainSuperAdmin(session);
+    await requireTenantUserPermission(session, "USERS_ACTIVATE");
+  } else {
+    if (
+      session.audience !== "TENANT_APP" ||
+      parsed.data.tenantId !== session.tenantId
+    ) {
+      throw forbidden("You can only manage users in your own tenant");
+    }
+    await requireTenantUserPermission(session, "USERS_ACTIVATE");
   }
 
   const activation = await prisma.$transaction(async (tx) => {
@@ -1136,13 +1157,20 @@ export async function regenerateSubTenantUserActivationLink(
       },
     });
     if (!membership) throw validationError("User not found in this sub-tenant");
-    if (
-      membership.user.status !== UserStatus.PENDING ||
-      membership.user.activatedAt
-    ) {
+    if (membership.user.status !== UserStatus.PENDING && membership.user.status !== UserStatus.ACTIVE) {
       throw validationError(
-        "Activation links can only be regenerated for pending accounts. Use password reset for active accounts or re-enable disabled accounts first.",
+        "Activation links can only be generated for pending or active accounts.",
       );
+    }
+
+    const now = new Date();
+    if (membership.user.status === UserStatus.ACTIVE) {
+      await tx.user.update({ where: { uuid: membership.user.uuid }, data: { username: null, passwordHash: null, status: UserStatus.PENDING, activatedAt: null, failedPasswordAttempts: 0, failedTotpAttempts: 0, lockedUntil: null, sessionsRevokedAt: now } });
+      await tx.userTwoFactorAuth.updateMany({ where: { userUuid: membership.user.uuid }, data: { encryptedSecret: null, pendingEncryptedSecret: null, pendingExpiresAt: null, enabledAt: null } });
+      await tx.authLoginChallenge.updateMany({ where: { userUuid: membership.user.uuid, consumedAt: null }, data: { consumedAt: now } });
+      await tx.userRecoveryCode.deleteMany({ where: { userUuid: membership.user.uuid } });
+      await tx.userPasswordResetToken.updateMany({ where: { userUuid: membership.user.uuid, usedAt: null, revokedAt: null }, data: { revokedAt: now } });
+      await tx.userSession.updateMany({ where: { userUuid: membership.user.uuid, tenantUuid: parsed.data.tenantId, revokedAt: null }, data: { revokedAt: now } });
     }
 
     const link = await createActivationToken(
@@ -1156,7 +1184,7 @@ export async function regenerateSubTenantUserActivationLink(
     );
     await writeAuthAudit(
       {
-        action: "auth.activation.link_regenerated",
+        action: membership.user.status === UserStatus.ACTIVE ? "auth.account.reactivated" : "auth.activation.link_regenerated",
         actorUserUuid: session.userId,
         tenantUuid: parsed.data.tenantId,
         targetType: "user",
@@ -1182,7 +1210,7 @@ export async function regenerateSubTenantUserActivationLink(
 }
 
 export async function generateTenantUserActivationLink(session: SessionPayload, userId: string) {
-  await requireTenantAdminTarget(session, userId);
+  await requireTenantAdminTarget(session, userId, "USERS_ACTIVATE");
   return regenerateSubTenantUserActivationLink(session, session.tenantId, userId);
 }
 
@@ -1192,13 +1220,18 @@ const tenantUserUpdateSchema = z.object({
   lastName: z.string().trim().min(1).max(60).optional(),
   role: z.enum(["ADMIN", "EDITOR"]).optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  suspended: z.boolean().optional(),
 });
 
-async function requireTenantAdminTarget(session: SessionPayload, userId: string) {
-  if (session.role !== "ADMIN") throw forbidden("Only tenant Admins can manage users");
+async function requireTenantAdminTarget(
+  session: SessionPayload,
+  userId: string,
+  permission: TenantUserPermission = "USERS_EDIT",
+) {
+  await requireTenantUserPermission(session, permission);
   const membership = await prisma.tenantMembership.findFirst({
-    where: { tenantUuid: session.tenantId, userUuid: userId, status: MembershipStatus.ACTIVE, role: { code: { in: ["ADMIN", "EDITOR"] } }, user: { deletedAt: null } },
-    select: { uuid: true, userUuid: true, role: { select: { code: true } }, user: { select: { status: true, email: true } } },
+    where: { tenantUuid: session.tenantId, userUuid: userId, status: { in: [MembershipStatus.ACTIVE, MembershipStatus.DISABLED] }, role: { code: { in: ["ADMIN", "EDITOR"] } }, user: { deletedAt: null } },
+    select: { uuid: true, userUuid: true, status: true, role: { select: { code: true } }, user: { select: { status: true, email: true } } },
   });
   if (!membership) throw validationError("User not found");
   if (membership.userUuid === session.userId) throw validationError("You cannot change your own tenant access");
@@ -1209,15 +1242,13 @@ export async function updateTenantUser(session: SessionPayload, userId: string, 
   const parsed = tenantUserUpdateSchema.safeParse(input);
   if (!parsed.success) throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
   if (userId === session.userId) {
-    if (session.role !== "ADMIN") {
-      throw forbidden("Only tenant Admins can manage users");
-    }
+    await requireTenantUserPermission(session, "USERS_EDIT");
     const ownMembership = await prisma.tenantMembership.findFirst({
       where: {
         tenantUuid: session.tenantId,
         userUuid: session.userId,
         status: MembershipStatus.ACTIVE,
-        role: { code: "ADMIN" },
+        role: { code: { in: ["ADMIN", "EDITOR"] } },
         tenant: { type: TenantType.SUB },
         user: { deletedAt: null, status: UserStatus.ACTIVE },
       },
@@ -1238,45 +1269,58 @@ export async function updateTenantUser(session: SessionPayload, userId: string, 
     if (!account) throw validationError("User not found");
     return { ...mapAuthUser(account), createdAt: null, lastLoginAt: null, totpEnabled: Boolean(account.totpEnabledAt) };
   }
-  const membership = await requireTenantAdminTarget(session, userId);
+  const updatePermission: TenantUserPermission = parsed.data.role
+    ? "USERS_CHANGE_ROLE"
+    : parsed.data.suspended !== undefined || parsed.data.status === "INACTIVE"
+      ? "USERS_SUSPEND"
+      : "USERS_EDIT";
+  const membership = await requireTenantAdminTarget(session, userId, updatePermission);
+  if (
+    (parsed.data.email || parsed.data.firstName || parsed.data.lastName) &&
+    updatePermission !== "USERS_EDIT"
+  ) {
+    await requireTenantUserPermission(session, "USERS_EDIT");
+  }
+  if (parsed.data.role && (parsed.data.suspended || parsed.data.status === "INACTIVE")) {
+    await requireTenantUserPermission(session, "USERS_SUSPEND");
+  }
   if (parsed.data.email && parsed.data.email.toLowerCase() !== membership.user.email) {
     const exists = await prisma.user.findUnique({ where: { email: parsed.data.email.toLowerCase() } });
     if (exists) throw validationError("Email already in use");
   }
-  if (membership.role.code === "ADMIN" && (parsed.data.role === "EDITOR" || parsed.data.status === "INACTIVE")) {
+  if (membership.role.code === "ADMIN" && (parsed.data.role === "EDITOR" || parsed.data.suspended || parsed.data.status === "INACTIVE")) {
     const activeAdmins = await prisma.tenantMembership.count({ where: { tenantUuid: session.tenantId, status: MembershipStatus.ACTIVE, role: { code: "ADMIN" }, user: { status: UserStatus.ACTIVE, deletedAt: null } } });
-    if (membership.user.status === UserStatus.ACTIVE && activeAdmins <= 1) throw validationError("Cannot remove the last active tenant Admin");
+    if (membership.user.status === UserStatus.ACTIVE && membership.status === MembershipStatus.ACTIVE && activeAdmins <= 1) throw validationError("Cannot remove the last active tenant Admin");
   }
   await prisma.$transaction(async (tx) => {
     if (parsed.data.role) await tx.tenantMembership.update({ where: { uuid: membership.uuid }, data: { roleUuid: await getRoleUuid(parsed.data.role) } });
+    if (parsed.data.suspended !== undefined) await tx.tenantMembership.update({ where: { uuid: membership.uuid }, data: { status: parsed.data.suspended ? MembershipStatus.DISABLED : MembershipStatus.ACTIVE } });
     await tx.user.update({ where: { uuid: userId }, data: { ...(parsed.data.email ? { email: parsed.data.email.toLowerCase() } : {}), ...(parsed.data.firstName ? { firstName: parsed.data.firstName } : {}), ...(parsed.data.lastName ? { lastName: parsed.data.lastName } : {}), ...(parsed.data.status ? { status: parsed.data.status as UserStatus } : {}) } });
-    if (parsed.data.status === "INACTIVE") await tx.userSession.updateMany({ where: { userUuid: userId, tenantUuid: session.tenantId, revokedAt: null }, data: { revokedAt: new Date() } });
+    if (parsed.data.suspended || parsed.data.status === "INACTIVE") await tx.userSession.updateMany({ where: { userUuid: userId, tenantUuid: session.tenantId, revokedAt: null }, data: { revokedAt: new Date() } });
   });
   await writeAuthAudit({ action: "TENANT_USER_UPDATED", actorUserUuid: session.userId, tenantUuid: session.tenantId, targetType: "user", targetUuid: userId, metadata: { changed: Object.keys(parsed.data) } });
-  const account = await findAccountByUuid(userId, session.tenantId);
+  const account = await findAccountByUuid(userId, session.tenantId, true);
   if (!account) throw validationError("User not found");
   return { ...mapAuthUser(account), createdAt: null, lastLoginAt: null, totpEnabled: Boolean(account.totpEnabledAt) };
 }
 
 export async function generateTenantUserPasswordResetLink(session: SessionPayload, userId: string) {
-  await requireTenantAdminTarget(session, userId);
+  await requireTenantAdminTarget(session, userId, "USERS_RESET_PASSWORD");
   return generateSubTenantUserPasswordResetLink(session, userId);
 }
 
-/** Remove a user's access from the current sub-tenant without hard-deleting identity data. */
+/** Delete a suspended user's membership from the current sub-tenant. */
 export async function deleteTenantUser(
   session: SessionPayload,
   userId: string,
 ) {
-  if (session.role !== "ADMIN") {
-    throw forbidden("Only tenant Admins can remove users");
-  }
+  await requireTenantUserPermission(session, "USERS_DELETE");
 
   const membership = await prisma.tenantMembership.findFirst({
     where: {
       tenantUuid: session.tenantId,
       userUuid: userId,
-      status: MembershipStatus.ACTIVE,
+      status: { in: [MembershipStatus.ACTIVE, MembershipStatus.DISABLED] },
       role: { code: { in: ["ADMIN", "EDITOR"] } },
       tenant: { type: TenantType.SUB },
       user: { deletedAt: null },
@@ -1284,6 +1328,7 @@ export async function deleteTenantUser(
     select: {
       uuid: true,
       userUuid: true,
+      status: true,
       user: { select: { email: true } },
       role: { select: { code: true } },
     },
@@ -1292,13 +1337,13 @@ export async function deleteTenantUser(
   if (membership.userUuid === session.userId) {
     throw validationError("You cannot remove your own access");
   }
+  if (membership.status !== MembershipStatus.DISABLED) {
+    throw validationError("Suspend this tenant user before deleting them");
+  }
 
   const now = new Date();
   await prisma.$transaction(async (tx) => {
-    // Serialize Admin removals for this tenant to protect the last-Admin rule
-    // from concurrent requests.
-    // Return a scalar row from the CTE; Prisma cannot deserialize the lock
-    // function's PostgreSQL `void` result directly.
+    // Serialize membership deletion with the active-membership check below.
     await tx.$queryRaw`WITH tenant_roster_lock AS MATERIALIZED (
       SELECT pg_advisory_xact_lock(hashtext(${session.tenantId}), 2)
     )
@@ -1308,7 +1353,7 @@ export async function deleteTenantUser(
       where: {
         uuid: membership.uuid,
         tenantUuid: session.tenantId,
-        status: MembershipStatus.ACTIVE,
+        status: MembershipStatus.DISABLED,
         role: { code: { in: ["ADMIN", "EDITOR"] } },
         tenant: { type: TenantType.SUB },
         user: { deletedAt: null },
@@ -1322,27 +1367,7 @@ export async function deleteTenantUser(
     });
     if (!current) throw validationError("User not found");
 
-    if (
-      current.role.code === "ADMIN" &&
-      current.user.status === UserStatus.ACTIVE
-    ) {
-      const activeAdminCount = await tx.tenantMembership.count({
-        where: {
-          tenantUuid: session.tenantId,
-          status: MembershipStatus.ACTIVE,
-          role: { code: "ADMIN" },
-          user: { status: UserStatus.ACTIVE, deletedAt: null },
-        },
-      });
-      if (activeAdminCount <= 1) {
-        throw validationError("Cannot remove the last active tenant Admin");
-      }
-    }
-
-    await tx.tenantMembership.update({
-      where: { uuid: current.uuid },
-      data: { status: MembershipStatus.DISABLED },
-    });
+    await tx.tenantMembership.delete({ where: { uuid: current.uuid } });
     await tx.userSession.updateMany({
       where: {
         userUuid: current.userUuid,
@@ -1405,5 +1430,99 @@ export async function deleteTenantUser(
     },
   });
 
+  return true;
+}
+
+async function requireManagedSubTenantUser(
+  session: SessionPayload,
+  tenantId: string,
+  userId: string,
+  permission: TenantUserPermission,
+) {
+  await requireMainSuperAdmin(session);
+  await requireTenantUserPermission(session, permission);
+  const parsed = z.object({ tenantId: z.string().uuid(), userId: z.string().uuid() })
+    .safeParse({ tenantId, userId });
+  if (!parsed.success) throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
+  const membership = await prisma.tenantMembership.findFirst({
+    where: {
+      tenantUuid: parsed.data.tenantId,
+      userUuid: parsed.data.userId,
+      status: { in: [MembershipStatus.ACTIVE, MembershipStatus.DISABLED] },
+      role: { code: { in: ["ADMIN", "EDITOR"] } },
+      tenant: { type: TenantType.SUB, status: TenantStatus.ACTIVE, deletedAt: null },
+      user: { deletedAt: null },
+    },
+    select: { uuid: true, userUuid: true, status: true, role: { select: { code: true } }, user: { select: { email: true, status: true } } },
+  });
+  if (!membership) throw validationError("User not found in this sub-tenant");
+  return { ...membership, tenantId: parsed.data.tenantId };
+}
+
+export async function updateManagedSubTenantUser(
+  session: SessionPayload,
+  tenantId: string,
+  userId: string,
+  input: unknown,
+) {
+  const parsed = tenantUserUpdateSchema.safeParse(input);
+  if (!parsed.success) throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
+  const permission: TenantUserPermission = parsed.data.role
+    ? "USERS_CHANGE_ROLE"
+    : parsed.data.suspended !== undefined || parsed.data.status === "INACTIVE"
+      ? "USERS_SUSPEND"
+      : "USERS_EDIT";
+  const membership = await requireManagedSubTenantUser(session, tenantId, userId, permission);
+  if ((parsed.data.email || parsed.data.firstName || parsed.data.lastName) && permission !== "USERS_EDIT") {
+    await requireTenantUserPermission(session, "USERS_EDIT");
+  }
+  if (parsed.data.role && (parsed.data.suspended || parsed.data.status === "INACTIVE")) {
+    await requireTenantUserPermission(session, "USERS_SUSPEND");
+  }
+  if (parsed.data.email && parsed.data.email.toLowerCase() !== membership.user.email) {
+    const exists = await prisma.user.findUnique({ where: { email: parsed.data.email.toLowerCase() }, select: { uuid: true } });
+    if (exists) throw validationError("Email already in use");
+  }
+  if (membership.role.code === "ADMIN" && (parsed.data.role === "EDITOR" || parsed.data.suspended || parsed.data.status === "INACTIVE")) {
+    const activeAdmins = await prisma.tenantMembership.count({ where: { tenantUuid: membership.tenantId, status: MembershipStatus.ACTIVE, role: { code: "ADMIN" }, user: { status: UserStatus.ACTIVE, deletedAt: null } } });
+    if (membership.status === MembershipStatus.ACTIVE && membership.user.status === UserStatus.ACTIVE && activeAdmins <= 1) {
+      throw validationError("Cannot remove the last active tenant Admin");
+    }
+  }
+  await prisma.$transaction(async (tx) => {
+    if (parsed.data.role) await tx.tenantMembership.update({ where: { uuid: membership.uuid }, data: { roleUuid: await getRoleUuid(parsed.data.role) } });
+    if (parsed.data.suspended !== undefined) await tx.tenantMembership.update({ where: { uuid: membership.uuid }, data: { status: parsed.data.suspended ? MembershipStatus.DISABLED : MembershipStatus.ACTIVE } });
+    await tx.user.update({ where: { uuid: membership.userUuid }, data: { ...(parsed.data.email ? { email: parsed.data.email.toLowerCase() } : {}), ...(parsed.data.firstName ? { firstName: parsed.data.firstName } : {}), ...(parsed.data.lastName ? { lastName: parsed.data.lastName } : {}), ...(parsed.data.status ? { status: parsed.data.status as UserStatus } : {}) } });
+    if (parsed.data.suspended || parsed.data.status === "INACTIVE") await tx.userSession.updateMany({ where: { userUuid: membership.userUuid, tenantUuid: membership.tenantId, revokedAt: null }, data: { revokedAt: new Date() } });
+  });
+  await writeAuthAudit({ action: "MANAGED_SUB_TENANT_USER_UPDATED", actorUserUuid: session.userId, tenantUuid: membership.tenantId, targetType: "user", targetUuid: membership.userUuid, metadata: { changed: Object.keys(parsed.data) } });
+  const account = await findAccountByUuid(membership.userUuid, membership.tenantId, true);
+  if (!account) throw validationError("User not found");
+  return { ...mapAuthUser(account), createdAt: null, lastLoginAt: null, totpEnabled: Boolean(account.totpEnabledAt) };
+}
+
+export async function generateManagedSubTenantUserPasswordResetLink(session: SessionPayload, tenantId: string, userId: string) {
+  const membership = await requireManagedSubTenantUser(session, tenantId, userId, "USERS_RESET_PASSWORD");
+  return generateSubTenantUserPasswordResetLink(session, membership.userUuid);
+}
+
+export async function deleteManagedSubTenantUser(session: SessionPayload, tenantId: string, userId: string) {
+  const membership = await requireManagedSubTenantUser(session, tenantId, userId, "USERS_DELETE");
+  if (membership.status !== MembershipStatus.DISABLED) {
+    throw validationError("Suspend this tenant user before deleting them");
+  }
+  const now = new Date();
+  await prisma.$transaction([
+    prisma.tenantMembership.delete({ where: { uuid: membership.uuid } }),
+    prisma.userSession.updateMany({ where: { userUuid: membership.userUuid, tenantUuid: membership.tenantId, revokedAt: null }, data: { revokedAt: now } }),
+  ]);
+  await writeAuthAudit({
+    action: "MANAGED_SUB_TENANT_USER_DELETED",
+    actorUserUuid: session.userId,
+    tenantUuid: membership.tenantId,
+    targetType: "user",
+    targetUuid: membership.userUuid,
+    metadata: { email: membership.user.email, membershipUuid: membership.uuid },
+  });
   return true;
 }

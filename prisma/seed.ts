@@ -14,6 +14,15 @@ const ROLE_IDS = {
   EDITOR: "00000000-0000-4000-8000-000000000003",
 } as const;
 
+const DEFAULT_ADMIN_USER_PERMISSIONS = [
+  "USERS_VIEW",
+  "USERS_CREATE",
+  "USERS_EDIT",
+  "USERS_ACTIVATE",
+  "USERS_SUSPEND",
+  "USERS_RESET_PASSWORD",
+] as const;
+
 async function ensureRoles() {
   const roles = [
     {
@@ -41,6 +50,13 @@ async function ensureRoles() {
       where: { code: role.code },
       update: { name: role.name, description: role.description },
       create: role,
+    });
+  }
+
+  for (const roleUuid of [ROLE_IDS.SUPERADMIN, ROLE_IDS.ADMIN]) {
+    const count = await prisma.rolePermission.count({ where: { roleUuid } });
+    if (count === 0) await prisma.rolePermission.createMany({
+      data: DEFAULT_ADMIN_USER_PERMISSIONS.map((permission) => ({ roleUuid, permission })),
     });
   }
 }

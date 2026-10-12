@@ -16,6 +16,7 @@ import {
   managementAppBaseUrl,
 } from "@/src/modules/tenants/tenant-domain.service";
 import { findAccountByUuid, mapAuthUser } from "@/src/modules/users/account";
+import { requireTenantUserPermission } from "@/src/modules/roles/role-permission.service";
 
 export function assertNotSelfPasswordReset(
   actorUserId: string,
@@ -94,14 +95,19 @@ export async function generateMainTenantUserPasswordResetLink(
   };
 }
 
-/** Sub-tenant password reset (SuperAdmin remote). */
+/** Sub-tenant password reset for a permitted tenant user or Main SuperAdmin. */
 export async function generateSubTenantUserPasswordResetLink(
   session: SessionPayload,
   targetUserUuid: string,
   correlationId?: string,
 ) {
-  if (session.role !== "SUPERADMIN" && session.role !== "ADMIN") {
-    throw forbidden("Only an authorized administrator can generate password reset links");
+  if (session.role === "SUPERADMIN") {
+    await requireTenantUserPermission(session, "USERS_RESET_PASSWORD");
+  } else {
+    if (session.audience !== "TENANT_APP") {
+      throw forbidden("Only an authorized tenant user can generate password reset links");
+    }
+    await requireTenantUserPermission(session, "USERS_RESET_PASSWORD");
   }
 
   assertNotSelfPasswordReset(session.userId, targetUserUuid);
@@ -110,7 +116,7 @@ export async function generateSubTenantUserPasswordResetLink(
   if (!target || target.tenant.type !== TenantType.SUB) {
     throw validationError("User not found");
   }
-  if (session.role === "ADMIN" && target.tenantUuid !== session.tenantId) {
+  if (session.role !== "SUPERADMIN" && target.tenantUuid !== session.tenantId) {
     throw forbidden("You can only manage users in your own tenant");
   }
 

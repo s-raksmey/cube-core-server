@@ -28,6 +28,11 @@ enum UserStatus {
   INACTIVE
 }
 
+enum MembershipStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum ActivationStatus {
   PENDING
   EXPIRED
@@ -41,6 +46,23 @@ enum UserType {
 }
 
 enum SubTenantRole {
+  ADMIN
+  EDITOR
+}
+
+enum TenantUserPermission {
+  USERS_VIEW
+  USERS_CREATE
+  USERS_EDIT
+  USERS_CHANGE_ROLE
+  USERS_ACTIVATE
+  USERS_SUSPEND
+  USERS_RESET_PASSWORD
+  USERS_DELETE
+}
+
+enum UserManagementRole {
+  SUPERADMIN
   ADMIN
   EDITOR
 }
@@ -115,6 +137,7 @@ type User {
   type: UserType!
   role: String!
   status: UserStatus
+  membershipStatus: MembershipStatus
   tenantId: ID!
   tenant: Tenant!
   createdAt: String
@@ -139,9 +162,13 @@ type TenantUserPage {
 type ManagedSubTenantUser {
   id: ID!
   fullName: String!
+  firstName: String
+  lastName: String
+  username: String
   email: String!
   role: String!
   accountStatus: UserStatus!
+  membershipStatus: MembershipStatus!
   activationStatus: ActivationStatus!
   activationLinkCreatedAt: String
   activationLinkExpiresAt: String
@@ -187,6 +214,7 @@ input UpdateMainTenantUserInput {
   lastName: String
   email: String
   status: UserStatus
+  suspended: Boolean
 }
 
 input UpdateTenantUserInput {
@@ -195,6 +223,17 @@ input UpdateTenantUserInput {
   lastName: String
   role: SubTenantRole
   status: UserStatus
+  suspended: Boolean
+}
+
+input UpdateTenantRolePermissionsInput {
+  role: UserManagementRole!
+  permissions: [TenantUserPermission!]!
+}
+
+type TenantRolePermissions {
+  role: UserManagementRole!
+  permissions: [TenantUserPermission!]!
 }
 
 type AuthPayload {
@@ -310,6 +349,9 @@ type RefreshSessionPayload {
 }
 
 type Query {
+  tenantRolePermissions: [TenantRolePermissions!]!
+  tenantRolePermissionSummary: [TenantRolePermissions!]!
+  tenantUserPermissions: [TenantUserPermission!]!
   mainTenantUserActivationLink(userId: ID!): ExistingActivationLinkPayload
   subTenantUserActivationLink(tenantId: ID!, userId: ID!): ExistingActivationLinkPayload
   tenantUserActivationLink(userId: ID!): ExistingActivationLinkPayload
@@ -334,6 +376,7 @@ type Query {
 }
 
 type Mutation {
+  updateTenantRolePermissions(input: UpdateTenantRolePermissionsInput!): TenantRolePermissions!
   login(
     email: String!
     password: String!
@@ -385,6 +428,9 @@ type Mutation {
     role: SubTenantRole = ADMIN
   ): CreateTenantUserPayload!
   regenerateSubTenantUserActivationLink(tenantId: ID!, userId: ID!): TenantActivationLinkPayload!
+  updateManagedSubTenantUser(tenantId: ID!, userId: ID!, input: UpdateTenantUserInput!): User!
+  generateManagedSubTenantUserPasswordResetLink(tenantId: ID!, userId: ID!): PasswordResetLinkPayload!
+  deleteManagedSubTenantUser(tenantId: ID!, userId: ID!): Boolean!
   updateTenantUser(id: ID!, input: UpdateTenantUserInput!): User!
   generateTenantUserActivationLink(userId: ID!): ActivationLinkPayload!
   generateTenantUserPasswordResetLink(userId: ID!): PasswordResetLinkPayload!

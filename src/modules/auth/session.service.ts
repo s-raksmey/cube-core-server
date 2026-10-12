@@ -4,7 +4,10 @@ import {
   UserStatus,
 } from "@prisma/client";
 import { prisma } from "@/src/lib/db";
-import { REFRESH_TOKEN_TTL_MS } from "@/src/lib/auth/constants";
+import {
+  REFRESH_TOKEN_TTL_MS,
+  CONSOLE_SESSION_IDLE_TIMEOUT_MS,
+} from "@/src/lib/auth/constants";
 import { hashToken, randomToken } from "@/src/lib/auth/crypto";
 import {
   createAccessToken,
@@ -24,6 +27,20 @@ export type AuthTokens = {
   sessionId: string;
   audience: AuthAudience;
 };
+
+function consoleSessionIsIdle(session: {
+  createdAt: Date;
+  lastUsedAt: Date | null;
+}, now = new Date()) {
+  return now.getTime() - (session.lastUsedAt ?? session.createdAt).getTime() >= CONSOLE_SESSION_IDLE_TIMEOUT_MS;
+}
+
+async function revokeIdleConsoleSession(sessionId: string) {
+  await prisma.userSession.updateMany({
+    where: { uuid: sessionId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}
 
 export async function createAuthenticatedSession(input: {
   account: LoadedAccount;
@@ -78,6 +95,10 @@ export async function refreshAuthenticatedSession(input: {
   }
   if (session.audience !== input.audience) {
     throw forbidden("Invalid session for this console");
+  }
+  if (consoleSessionIsIdle(session)) {
+    await revokeIdleConsoleSession(session.uuid);
+    throw unauthenticated("Session expired due to inactivity");
   }
 
   const account = await findAccountByUuid(session.userUuid, session.tenantUuid);
@@ -163,6 +184,11 @@ export async function resolveSessionFromAccessToken(token: string) {
     throw unauthenticated();
   }
 
+  if (consoleSessionIsIdle(session)) {
+    await revokeIdleConsoleSession(session.uuid);
+    throw unauthenticated("Session expired due to inactivity");
+  }
+
   const account = await findAccountByUuid(payload.userId, payload.tenantId);
   if (
     !account ||
@@ -184,6 +210,11 @@ export async function resolveSessionFromAccessToken(token: string) {
   ) {
     throw unauthenticated();
   }
+
+  await prisma.userSession.updateMany({
+    where: { uuid: session.uuid, revokedAt: null },
+    data: { lastUsedAt: new Date() },
+  });
 
   return payload;
 }

@@ -8,6 +8,7 @@ import { authResolvers } from "@/src/graphql/resolvers/auth";
 import { dashboardResolvers } from "@/src/graphql/resolvers/dashboard";
 import { tenantsResolvers } from "@/src/graphql/resolvers/tenants";
 import { usersResolvers } from "@/src/graphql/resolvers/users";
+import { rolesPermissionsResolver } from "@/src/graphql/resolvers/roles/roles-permissions-resolver";
 
 const typeDefs = readFileSync(
   join(process.cwd(), "src/graphql/schema.graphql"),
@@ -22,5 +23,6 @@ export const schema = createSchema<GraphQLContext>({
     dashboardResolvers,
     tenantsResolvers,
     usersResolvers,
+    rolesPermissionsResolver,
   ),
 });

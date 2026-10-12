@@ -6,6 +6,12 @@ const mocks = vi.hoisted(() => {
   const tx = {
     $queryRaw: vi.fn(),
     tenantMembership: { findFirst: vi.fn() },
+    user: { update: vi.fn() },
+    userTwoFactorAuth: { updateMany: vi.fn() },
+    authLoginChallenge: { updateMany: vi.fn() },
+    userRecoveryCode: { deleteMany: vi.fn() },
+    userPasswordResetToken: { updateMany: vi.fn() },
+    userSession: { updateMany: vi.fn() },
   };
   let transactionTail: Promise<unknown> = Promise.resolve();
   const prisma = {
@@ -29,6 +35,7 @@ const mocks = vi.hoisted(() => {
     getMainTenant: vi.fn(),
     mapAuthUser: vi.fn(),
     displayFullName: vi.fn(),
+    requireTenantUserPermission: vi.fn(),
   };
   return prisma;
 });
@@ -39,6 +46,9 @@ vi.mock("@/src/modules/auth/activation.service", () => ({
   getExistingActivationLink: mocks.getExistingActivationLink,
 }));
 vi.mock("@/src/modules/auth/audit-auth", () => ({ writeAuthAudit: mocks.writeAuthAudit }));
+vi.mock("@/src/modules/roles/role-permission.service", () => ({
+  requireTenantUserPermission: mocks.requireTenantUserPermission,
+}));
 vi.mock("@/src/modules/users/account", () => ({
   displayFullName: mocks.displayFullName,
   getMainTenant: mocks.getMainTenant,
@@ -67,6 +77,12 @@ beforeEach(() => {
   mocks.tenantMembership.findFirst.mockReset();
   mocks.tenantMembership.count.mockReset().mockResolvedValue(0);
   mocks.tx.tenantMembership.findFirst.mockReset();
+  mocks.tx.user.update.mockReset().mockResolvedValue(undefined);
+  mocks.tx.userTwoFactorAuth.updateMany.mockReset().mockResolvedValue(undefined);
+  mocks.tx.authLoginChallenge.updateMany.mockReset().mockResolvedValue(undefined);
+  mocks.tx.userRecoveryCode.deleteMany.mockReset().mockResolvedValue(undefined);
+  mocks.tx.userPasswordResetToken.updateMany.mockReset().mockResolvedValue(undefined);
+  mocks.tx.userSession.updateMany.mockReset().mockResolvedValue(undefined);
   mocks.tx.$queryRaw.mockReset().mockResolvedValue([]);
   mocks.resetTransactions();
   mocks.createActivationToken.mockReset();
@@ -76,6 +92,7 @@ beforeEach(() => {
   mocks.getMainTenant.mockReset().mockResolvedValue({ uuid: superAdminSession.tenantId });
   mocks.mapAuthUser.mockReset().mockReturnValue({ id: userId });
   mocks.displayFullName.mockReset().mockImplementation((user: { firstName?: string; lastName?: string }) => `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim());
+  mocks.requireTenantUserPermission.mockReset().mockResolvedValue(undefined);
 });
 
 describe("Main Console tenant user activation management", () => {
@@ -94,11 +111,24 @@ describe("Main Console tenant user activation management", () => {
     expect(mocks.tenant.findFirst).not.toHaveBeenCalled();
   });
 
+  it("enforces the SuperAdmin View users policy before loading a sub-tenant roster", async () => {
+    mocks.requireTenantUserPermission.mockRejectedValueOnce({
+      extensions: { code: "FORBIDDEN" },
+    });
+    await expect(listManagedSubTenantUsers(superAdminSession, { tenantId }))
+      .rejects.toMatchObject({ extensions: { code: "FORBIDDEN" } });
+    expect(mocks.tenant.findFirst).not.toHaveBeenCalled();
+  });
+
   it("accepts a null GraphQL search value as no filter", async () => {
     await expect(listManagedSubTenantUsers(superAdminSession, { tenantId, search: null }))
       .resolves.toMatchObject({ items: [], total: 0 });
     expect(mocks.tenantMembership.findMany.mock.calls[0]?.[0].where.user)
       .toEqual({ deletedAt: null });
+    expect(mocks.requireTenantUserPermission).toHaveBeenCalledWith(
+      superAdminSession,
+      "USERS_VIEW",
+    );
   });
 
   it("derives expired link status without treating the pending account as expired", async () => {
@@ -198,6 +228,34 @@ describe("Main Console tenant user activation management", () => {
     }));
   });
 
+  it("allows an Editor with Activate users permission to view and regenerate a pending link", async () => {
+    const editorSession = {
+      ...superAdminSession,
+      tenantId,
+      role: "EDITOR",
+      audience: "TENANT_APP",
+    } as SessionPayload;
+    const link = {
+      activationUrl: "http://localhost:3001/activate?token=one-time",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+    mocks.tenantMembership.findFirst.mockResolvedValue({ userUuid: userId });
+    mocks.getExistingActivationLink.mockResolvedValue(link);
+    mocks.tx.tenantMembership.findFirst.mockResolvedValue({
+      user: { uuid: userId, status: UserStatus.PENDING, activatedAt: null },
+    });
+    mocks.createActivationToken.mockResolvedValue(link);
+
+    await expect(getSubTenantUserActivationLink(editorSession, tenantId, userId))
+      .resolves.toEqual(link);
+    await expect(regenerateSubTenantUserActivationLink(editorSession, tenantId, userId))
+      .resolves.toMatchObject(link);
+    expect(mocks.requireTenantUserPermission).toHaveBeenCalledWith(
+      editorSession,
+      "USERS_ACTIVATE",
+    );
+  });
+
   it("rejects cross-tenant memberships", async () => {
     mocks.tx.tenantMembership.findFirst.mockResolvedValue(null);
     await expect(regenerateSubTenantUserActivationLink(superAdminSession, tenantId, userId))
@@ -205,12 +263,30 @@ describe("Main Console tenant user activation management", () => {
     expect(mocks.createActivationToken).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [UserStatus.ACTIVE, new Date()],
-    [UserStatus.INACTIVE, null],
-  ] as const)("rejects link regeneration for %s accounts", async (status, activatedAt) => {
+  it("reactivates an active account by clearing its sign-in credentials and 2FA setup", async () => {
     mocks.tx.tenantMembership.findFirst.mockResolvedValue({
-      user: { uuid: userId, status, activatedAt },
+      user: { uuid: userId, status: UserStatus.ACTIVE, activatedAt: new Date() },
+    });
+    mocks.createActivationToken.mockResolvedValue({
+      activationUrl: "https://tenant.example/activate?token=reissued",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    await expect(regenerateSubTenantUserActivationLink(superAdminSession, tenantId, userId))
+      .resolves.toMatchObject({ activationUrl: expect.stringContaining("reissued") });
+    expect(mocks.tx.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { uuid: userId },
+      data: expect.objectContaining({ status: UserStatus.PENDING, passwordHash: null }),
+    }));
+    expect(mocks.tx.userTwoFactorAuth.updateMany).toHaveBeenCalledOnce();
+    expect(mocks.writeAuthAudit).toHaveBeenCalledWith(expect.objectContaining({
+      action: "auth.account.reactivated",
+    }), mocks.tx);
+  });
+
+  it("rejects link regeneration for inactive accounts", async () => {
+    mocks.tx.tenantMembership.findFirst.mockResolvedValue({
+      user: { uuid: userId, status: UserStatus.INACTIVE, activatedAt: null },
     });
     await expect(regenerateSubTenantUserActivationLink(superAdminSession, tenantId, userId))
       .rejects.toMatchObject({ extensions: { code: "VALIDATION" } });

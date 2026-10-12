@@ -34,6 +34,7 @@ const updateSchema = z.object({
   firstName: namePart.optional(),
   lastName: namePart.optional(),
   status: z.enum(["ACTIVE", "LOCKED", "INACTIVE", "PENDING"]).optional(),
+  suspended: z.boolean().optional(),
 });
 const listSchema = z.object({
   search: z.string().trim().max(120).optional(),
@@ -87,7 +88,7 @@ async function countActiveSuperAdmins(client: typeof prisma | Prisma.Transaction
 }
 
 async function mapMainRow(userUuid: string) {
-  const account = await findAccountByUuid(userUuid);
+  const account = await findAccountByUuid(userUuid, undefined, true);
   if (!account) throw validationError("User not found");
   const mapped = mapAuthUser(account);
   const user = await prisma.user.findUniqueOrThrow({
@@ -140,6 +141,7 @@ export async function listMainTenantUsers(
     prisma.tenantMembership.findMany({
       where,
       select: {
+        status: true,
         user: {
           select: {
             uuid: true,
@@ -170,7 +172,7 @@ export async function listMainTenantUsers(
     prisma.tenantMembership.count({ where }),
   ]);
 
-  const items = rows.map(({ user, tenant }) => ({
+  const items = rows.map(({ user, tenant, status: membershipStatus }) => ({
     id: user.uuid,
     uuid: user.uuid,
     email: user.email,
@@ -181,6 +183,7 @@ export async function listMainTenantUsers(
     type: "MAIN" as const,
     role: "SUPERADMIN",
     status: user.status,
+    membershipStatus,
     tenantId: tenant.uuid,
     tenant: {
       id: tenant.uuid,
@@ -204,7 +207,7 @@ export async function listMainTenantUsers(
 
 export async function getMainTenantUser(session: SessionPayload, userId: string) {
   await requireSuperAdmin(session);
-  const account = await findAccountByUuid(userId);
+  const account = await findAccountByUuid(userId, undefined, true);
   if (
     !account ||
     account.tenant.type !== TenantType.MAIN ||
@@ -284,6 +287,7 @@ export async function updateMainTenantUser(
     firstName?: string;
     lastName?: string;
     status?: UserStatus;
+    suspended?: boolean;
   },
 ) {
   await requireSuperAdmin(session);
@@ -292,7 +296,7 @@ export async function updateMainTenantUser(
     throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
   }
 
-  const existing = await findAccountByUuid(userId);
+  const existing = await findAccountByUuid(userId, undefined, true);
   if (
     !existing ||
     existing.tenant.type !== TenantType.MAIN ||
@@ -301,8 +305,8 @@ export async function updateMainTenantUser(
     throw validationError("User not found");
   }
 
-  const changesRemoveAvailability =
-    parsed.data.status !== undefined && parsed.data.status !== UserStatus.ACTIVE;
+  const changesRemoveAvailability = parsed.data.suspended === true ||
+    (parsed.data.status !== undefined && parsed.data.status !== UserStatus.ACTIVE);
 
   if (parsed.data.email) {
     const email = parsed.data.email.toLowerCase();
@@ -348,13 +352,15 @@ export async function updateMainTenantUser(
         targetUserId: existing.uuid,
         actorUserId: session.userId,
         targetStatus: current.status,
-        nextStatus: parsed.data.status,
+        nextStatus: parsed.data.suspended ? UserStatus.INACTIVE : parsed.data.status,
         activeSuperAdminCount: await countActiveSuperAdmins(tx),
       });
       await tx.user.update({ where: { uuid: existing.uuid }, data: updateData });
+      if (parsed.data.suspended !== undefined) await tx.tenantMembership.update({ where: { uuid: existing.membershipUuid }, data: { status: parsed.data.suspended ? MembershipStatus.DISABLED : MembershipStatus.ACTIVE } });
     });
   } else {
     await prisma.user.update({ where: { uuid: existing.uuid }, data: updateData });
+    if (parsed.data.suspended !== undefined) await prisma.tenantMembership.update({ where: { uuid: existing.membershipUuid }, data: { status: parsed.data.suspended ? MembershipStatus.DISABLED : MembershipStatus.ACTIVE } });
   }
 
   if (
@@ -390,7 +396,7 @@ export async function deleteMainTenantUser(
   userId: string,
 ) {
   await requireSuperAdmin(session);
-  const existing = await findAccountByUuid(userId);
+  const existing = await findAccountByUuid(userId, undefined, true);
   if (
     !existing ||
     existing.tenant.type !== TenantType.MAIN ||
@@ -398,20 +404,12 @@ export async function deleteMainTenantUser(
   ) {
     throw validationError("User not found");
   }
+  if (existing.membershipStatus !== MembershipStatus.DISABLED) {
+    throw validationError("Suspend this user before deleting them");
+  }
 
   await prisma.$transaction(async (tx) => {
     await lockSuperAdminRoster(tx);
-    const current = await tx.user.findUnique({
-      where: { uuid: existing.uuid },
-      select: { status: true },
-    });
-    if (!current) throw validationError("User not found");
-    assertCanRemoveLastActiveSuperAdmin({
-      targetUserId: existing.uuid,
-      actorUserId: session.userId,
-      targetStatus: current.status,
-      activeSuperAdminCount: await countActiveSuperAdmins(tx),
-    });
     await tx.auditLog.create({
       data: {
         actorUserUuid: session.userId,

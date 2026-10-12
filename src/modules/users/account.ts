@@ -19,6 +19,7 @@ export type LoadedAccount = {
   tenantUuid: string;
   roleCode: string;
   membershipUuid: string;
+  membershipStatus?: MembershipStatus;
   totpSecretEnc: string | null;
   totpEnabledAt: Date | null;
   sessionsRevokedAt: Date | null;
@@ -51,6 +52,7 @@ export function mapAuthUser(account: LoadedAccount) {
     type: account.tenant.type === TenantType.MAIN ? "MAIN" : "SUB",
     role: account.roleCode,
     status: account.status,
+    membershipStatus: account.membershipStatus ?? MembershipStatus.ACTIVE,
     tenantId: account.tenantUuid,
     tenant: {
       id: account.tenant.uuid,
@@ -66,11 +68,14 @@ export function mapAuthUser(account: LoadedAccount) {
 async function loadFromMembership(
   userUuid: string,
   tenantUuid?: string,
+  includeDisabled = false,
 ): Promise<LoadedAccount | null> {
   const membership = await prisma.tenantMembership.findFirst({
     where: {
       userUuid,
-      status: MembershipStatus.ACTIVE,
+      status: includeDisabled
+        ? { in: [MembershipStatus.ACTIVE, MembershipStatus.DISABLED] }
+        : MembershipStatus.ACTIVE,
       ...(tenantUuid ? { tenantUuid } : {}),
     },
     include: {
@@ -94,6 +99,7 @@ async function loadFromMembership(
     tenantUuid: tenant.uuid,
     roleCode: role.code,
     membershipUuid: membership.uuid,
+    membershipStatus: membership.status,
     totpSecretEnc: user.twoFactorAuth?.encryptedSecret ?? null,
     totpEnabledAt: user.twoFactorAuth?.enabledAt ?? null,
     sessionsRevokedAt: user.sessionsRevokedAt,
@@ -126,8 +132,9 @@ export async function findAccountByEmailOrUsername(
 export async function findAccountByUuid(
   userUuid: string,
   tenantUuid?: string,
+  includeDisabled = false,
 ): Promise<LoadedAccount | null> {
-  return loadFromMembership(userUuid, tenantUuid);
+  return loadFromMembership(userUuid, tenantUuid, includeDisabled);
 }
 
 export function assertConsoleAuthorization(

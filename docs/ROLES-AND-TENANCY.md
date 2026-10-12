@@ -23,6 +23,7 @@ One `tenants` table (`MAIN` / `SUB`). **Users are unified**:
 | --- | --- |
 | `users` | Identity: names, optional username, unique email, password hash, status `PENDING` \| `ACTIVE` \| `LOCKED` \| `INACTIVE` |
 | `roles` | Seeded: `SUPERADMIN`, `ADMIN`, `EDITOR` |
+| `role_permissions` | SuperAdmin-configured user-management permissions for the SUB `ADMIN` and `EDITOR` roles |
 | `tenant_memberships` | Unique `(user_uuid, tenant_uuid)` + role |
 
 | Role | Tenant type | Responsibility |
@@ -64,6 +65,25 @@ Only **Admin** and **Editor** may hold a login scoped to a sub-tenant.
    - `ADMIN_CONSOLE` → **SuperAdmin only** (main tenant)
    - `TENANT_APP` → **Admin or Editor** on a sub-tenant only
    - SuperAdmin credentials must be rejected by the tenant app login path
+
+## Sub-tenant role permissions
+
+The Main Console owns the shared permission sets for the `ADMIN` and `EDITOR`
+roles. They apply to those roles in every sub-tenant and are enforced by the
+server on each user-management operation. The current permissions are:
+
+- View users
+- Create users
+- Edit users
+- Change user roles
+- Activate users
+- Suspend users
+- Reset password
+- Delete users
+
+New databases give `ADMIN` View, Create, Edit, Activate, Suspend, and Reset
+Password permissions. `EDITOR` starts with no user-management permissions.
+`SUPERADMIN` remains a fixed Main Tenant role and is not configurable here.
 
 ## Activation lifecycle
 

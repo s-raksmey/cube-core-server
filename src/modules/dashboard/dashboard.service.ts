@@ -8,6 +8,7 @@ import { prisma } from "@/src/lib/db";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden } from "@/src/lib/errors";
 import { displayFullName } from "@/src/modules/users/account";
+import { getTenantUserPermissions } from "@/src/modules/roles/role-permission.service";
 
 function startOfMonthsAgo(months: number) {
   const date = new Date();
@@ -157,21 +158,23 @@ export async function getTenantDashboard(session: SessionPayload) {
     throw forbidden("Invalid sub-tenant session");
   }
 
+  const canViewUsers = (await getTenantUserPermissions(session)).includes("USERS_VIEW");
+
   const [totalUsers, activeUsers, recentMemberships, auditLogs] =
     await Promise.all([
-      prisma.tenantMembership.count({
+      canViewUsers ? prisma.tenantMembership.count({
         where: {
           tenantUuid: session.tenantId,
           user: { deletedAt: null },
         },
-      }),
-      prisma.tenantMembership.count({
+      }) : Promise.resolve(0),
+      canViewUsers ? prisma.tenantMembership.count({
         where: {
           tenantUuid: session.tenantId,
           user: { deletedAt: null, status: UserStatus.ACTIVE },
         },
-      }),
-      prisma.tenantMembership.findMany({
+      }) : Promise.resolve(0),
+      canViewUsers ? prisma.tenantMembership.findMany({
         where: {
           tenantUuid: session.tenantId,
           user: { deletedAt: null },
@@ -192,7 +195,7 @@ export async function getTenantDashboard(session: SessionPayload) {
             },
           },
         },
-      }),
+      }) : Promise.resolve([]),
       prisma.auditLog.findMany({
         where: { tenantUuid: session.tenantId },
         orderBy: { createdAt: "desc" },
