@@ -74,7 +74,13 @@ src/
     db/
     auth/
     errors/
+tests/
+  graphql/              # GraphQL context and resolver integration tests
+  lib/                   # shared-library unit tests
+  modules/               # domain service and authorization tests, mirroring src/modules
 ```
+
+Production code stays under `src/`. Test files live only under `tests/`, grouped by the production domain they cover.
 
 The server is **GraphQL-only** — no Next.js `app/`, no REST `/auth` or `/api` routes. Login, 2FA, activation, password reset, and refresh are GraphQL queries/mutations.
 

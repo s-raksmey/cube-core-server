@@ -18,6 +18,12 @@ export const tenantUserPermissionCodes = [
 
 export type TenantUserPermission = (typeof tenantUserPermissionCodes)[number];
 
+/** Editor can be granted only these user-management permissions. */
+export const allowedEditorUserPermissions = [
+  "USERS_VIEW",
+  "USERS_EDIT",
+] as const satisfies readonly TenantUserPermission[];
+
 const updateRolePermissionsSchema = z.object({
   role: z.enum(["SUPERADMIN", "ADMIN", "EDITOR"]),
   permissions: z.array(z.enum(tenantUserPermissionCodes)).max(tenantUserPermissionCodes.length),
@@ -85,6 +91,17 @@ export async function updateTenantRolePermissions(session: SessionPayload, input
   await requireMainSuperAdmin(session);
   const parsed = updateRolePermissionsSchema.safeParse(input);
   if (!parsed.success) throw validationError(parsed.error.issues[0]?.message ?? "Invalid role permissions");
+  if (
+    parsed.data.role === "EDITOR" &&
+    parsed.data.permissions.some(
+      (permission) =>
+        !(allowedEditorUserPermissions as readonly TenantUserPermission[]).includes(
+          permission,
+        ),
+    )
+  ) {
+    throw validationError("Editor can only be granted View users and Edit users.");
+  }
 
   const role = await prisma.role.findUnique({
     where: { code: parsed.data.role },
@@ -134,7 +151,13 @@ export async function getTenantUserPermissions(session: SessionPayload) {
       user: { status: UserStatus.ACTIVE, deletedAt: null },
       role: { code: { in: ["ADMIN", "EDITOR"] } },
     },
-    select: { role: { select: { permissions: { select: { permission: true } } } } },
+    select: {
+      role: {
+        select: {
+          permissions: { select: { permission: true } },
+        },
+      },
+    },
   });
   if (!membership) throw forbidden("You do not have access to this tenant");
   return membership.role.permissions

@@ -1309,7 +1309,9 @@ export async function generateTenantUserPasswordResetLink(session: SessionPayloa
   return generateSubTenantUserPasswordResetLink(session, userId);
 }
 
-/** Delete a suspended user's membership from the current sub-tenant. */
+/**
+ * Delete a suspended user and their account from the database.
+ */
 export async function deleteTenantUser(
   session: SessionPayload,
   userId: string,
@@ -1342,7 +1344,7 @@ export async function deleteTenantUser(
   }
 
   const now = new Date();
-  await prisma.$transaction(async (tx) => {
+  const deletedFromDatabase = await prisma.$transaction(async (tx) => {
     // Serialize membership deletion with the active-membership check below.
     await tx.$queryRaw`WITH tenant_roster_lock AS MATERIALIZED (
       SELECT pg_advisory_xact_lock(hashtext(${session.tenantId}), 2)
@@ -1377,44 +1379,9 @@ export async function deleteTenantUser(
       data: { revokedAt: now },
     });
 
-    const hasOtherActiveMembership =
-      (await tx.tenantMembership.count({
-        where: {
-          userUuid: current.userUuid,
-          status: MembershipStatus.ACTIVE,
-        },
-      })) > 0;
-
-    if (!hasOtherActiveMembership) {
-      await tx.user.update({
-        where: { uuid: current.userUuid },
-        data: {
-          status: UserStatus.INACTIVE,
-          deletedAt: now,
-          sessionsRevokedAt: now,
-        },
-      });
-      await tx.userSession.updateMany({
-        where: { userUuid: current.userUuid, revokedAt: null },
-        data: { revokedAt: now },
-      });
-      await tx.userActivationToken.updateMany({
-        where: {
-          userUuid: current.userUuid,
-          usedAt: null,
-          revokedAt: null,
-        },
-        data: { revokedAt: now, encryptedToken: null },
-      });
-      await tx.userPasswordResetToken.updateMany({
-        where: {
-          userUuid: current.userUuid,
-          usedAt: null,
-          revokedAt: null,
-        },
-        data: { revokedAt: now },
-      });
-    }
+    // User-owned records and memberships cascade from this hard delete.
+    await tx.user.delete({ where: { uuid: current.userUuid } });
+    return true;
   });
 
   await writeAuthAudit({
@@ -1427,6 +1394,7 @@ export async function deleteTenantUser(
       email: membership.user.email,
       role: membership.role.code,
       membershipUuid: membership.uuid,
+      deletedFromDatabase,
     },
   });
 
@@ -1511,18 +1479,23 @@ export async function deleteManagedSubTenantUser(session: SessionPayload, tenant
   if (membership.status !== MembershipStatus.DISABLED) {
     throw validationError("Suspend this tenant user before deleting them");
   }
-  const now = new Date();
-  await prisma.$transaction([
-    prisma.tenantMembership.delete({ where: { uuid: membership.uuid } }),
-    prisma.userSession.updateMany({ where: { userUuid: membership.userUuid, tenantUuid: membership.tenantId, revokedAt: null }, data: { revokedAt: now } }),
-  ]);
+  const deletedFromDatabase = await prisma.$transaction(async (tx) => {
+    await tx.tenantMembership.delete({ where: { uuid: membership.uuid } });
+    // User-owned records and memberships cascade from this hard delete.
+    await tx.user.delete({ where: { uuid: membership.userUuid } });
+    return true;
+  });
   await writeAuthAudit({
     action: "MANAGED_SUB_TENANT_USER_DELETED",
     actorUserUuid: session.userId,
     tenantUuid: membership.tenantId,
     targetType: "user",
     targetUuid: membership.userUuid,
-    metadata: { email: membership.user.email, membershipUuid: membership.uuid },
+    metadata: {
+      email: membership.user.email,
+      membershipUuid: membership.uuid,
+      deletedFromDatabase,
+    },
   });
   return true;
 }

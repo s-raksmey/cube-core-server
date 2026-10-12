@@ -22,6 +22,7 @@ import {
   findAccountByUuid,
 } from "@/src/modules/users/account";
 import { generateMainTenantUserPasswordResetLink } from "@/src/modules/auth/password-reset.service";
+import { requireTenantUserPermission } from "@/src/modules/roles/role-permission.service";
 
 const namePart = z.string().trim().min(1).max(60);
 const createSchema = z.object({
@@ -116,7 +117,6 @@ export async function listMainTenantUsers(
   if (!parsed.success) {
     throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
   }
-
   const mainTenant = await getMainTenant();
   const search = parsed.data.search;
   const where: Prisma.TenantMembershipWhereInput = {
@@ -295,6 +295,9 @@ export async function updateMainTenantUser(
   if (!parsed.success) {
     throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
   }
+  if (parsed.data.suspended !== undefined) {
+    await requireTenantUserPermission(session, "USERS_SUSPEND");
+  }
 
   const existing = await findAccountByUuid(userId, undefined, true);
   if (
@@ -364,9 +367,10 @@ export async function updateMainTenantUser(
   }
 
   if (
-    parsed.data.status !== undefined &&
-    parsed.data.status !== UserStatus.ACTIVE &&
-    existing.status === UserStatus.ACTIVE
+    parsed.data.suspended === true ||
+    (parsed.data.status !== undefined &&
+      parsed.data.status !== UserStatus.ACTIVE &&
+      existing.status === UserStatus.ACTIVE)
   ) {
     await revokeAllUserSessions(existing.uuid);
     await prisma.userActivationToken.updateMany({

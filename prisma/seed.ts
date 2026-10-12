@@ -23,6 +23,11 @@ const DEFAULT_ADMIN_USER_PERMISSIONS = [
   "USERS_RESET_PASSWORD",
 ] as const;
 
+const DEFAULT_EDITOR_USER_PERMISSIONS = [
+  "USERS_VIEW",
+  "USERS_EDIT",
+] as const;
+
 async function ensureRoles() {
   const roles = [
     {
@@ -57,6 +62,18 @@ async function ensureRoles() {
     const count = await prisma.rolePermission.count({ where: { roleUuid } });
     if (count === 0) await prisma.rolePermission.createMany({
       data: DEFAULT_ADMIN_USER_PERMISSIONS.map((permission) => ({ roleUuid, permission })),
+    });
+  }
+
+  const editorPermissionCount = await prisma.rolePermission.count({
+    where: { roleUuid: ROLE_IDS.EDITOR },
+  });
+  if (editorPermissionCount === 0) {
+    await prisma.rolePermission.createMany({
+      data: DEFAULT_EDITOR_USER_PERMISSIONS.map((permission) => ({
+        roleUuid: ROLE_IDS.EDITOR,
+        permission,
+      })),
     });
   }
 }

@@ -14,6 +14,7 @@ export const usersUpdateMainResolver = {
           lastName?: string | null;
           email?: string | null;
           status?: UserStatus | null;
+          suspended?: boolean | null;
         };
       },
       ctx: GraphQLContext,
@@ -27,6 +28,9 @@ export const usersUpdateMainResolver = {
           : {}),
         ...(args.input.email != null ? { email: args.input.email } : {}),
         ...(args.input.status != null ? { status: args.input.status } : {}),
+        ...(args.input.suspended != null
+          ? { suspended: args.input.suspended }
+          : {}),
       });
     },
   },
