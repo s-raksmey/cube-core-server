@@ -50,7 +50,7 @@ Main Console activations use `ADMIN_APP_URL`. Sub-tenant invitations use `TENANT
 - A SuperAdmin **cannot** generate a reset link for their own account (another SuperAdmin must do it).
 - **Main Tenant SuperAdmins:** `generateMainTenantUserPasswordResetLink`.
 - **Sub-tenant users:** `generatePasswordResetLink`.
-- Reset links expire in 15 minutes, single-use, stored as hashes only.
+- Reset links expire in one hour, are single-use, and retain an encrypted token so an authorized manager can retrieve the current valid link before replacing it.
 - Reset preserves 2FA; revokes all sessions.
 - Reset pages: `/password-reset?token=…` on admin or tenant.
 

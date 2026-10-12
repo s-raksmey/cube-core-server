@@ -19,7 +19,8 @@ export const CONSOLE_SESSION_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 export const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 /** Pending TOTP secret before first verified code. Keep aligned with challenge TTL. */
 export const TOTP_PENDING_TTL_MS = CHALLENGE_TTL_MS;
-export const PASSWORD_RESET_TTL_MS = 15 * 60 * 1000;
+/** Single-use password reset links issued by either management console. */
+export const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 /** Account activation links (SuperAdmin-provisioned). */
 export const ACTIVATION_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_CHALLENGE_ATTEMPTS = 3;
