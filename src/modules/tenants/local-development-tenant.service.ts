@@ -41,6 +41,7 @@ export async function findLocalDevelopmentTenant() {
           type: true,
           status: true,
           deletedAt: true,
+          branding: { select: { managementLogoPath: true, websiteLogoPath: true, faviconPath: true, publicWebsiteFaviconPath: true, openGraphImagePath: true } },
         },
       },
     },

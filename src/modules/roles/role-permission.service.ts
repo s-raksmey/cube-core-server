@@ -14,14 +14,17 @@ export const tenantUserPermissionCodes = [
   "USERS_SUSPEND",
   "USERS_RESET_PASSWORD",
   "USERS_DELETE",
+  "BRANDING_VIEW",
+  "BRANDING_UPDATE",
 ] as const;
 
 export type TenantUserPermission = (typeof tenantUserPermissionCodes)[number];
 
-/** Editor can be granted only these user-management permissions. */
+/** Editor can manage user profiles and view the tenant settings, but cannot edit settings. */
 export const allowedEditorUserPermissions = [
   "USERS_VIEW",
   "USERS_EDIT",
+  "BRANDING_VIEW",
 ] as const satisfies readonly TenantUserPermission[];
 
 const updateRolePermissionsSchema = z.object({
@@ -31,10 +34,10 @@ const updateRolePermissionsSchema = z.object({
   if (new Set(value.permissions).size !== value.permissions.length) {
     ctx.addIssue({ code: "custom", path: ["permissions"], message: "Permissions must be unique" });
   }
-  if (
-    value.permissions.some((permission) => permission !== "USERS_VIEW") &&
-    !value.permissions.includes("USERS_VIEW")
-  ) {
+  const hasUserManagementAction = value.permissions.some(
+    (permission) => permission.startsWith("USERS_") && permission !== "USERS_VIEW",
+  );
+  if (hasUserManagementAction && !value.permissions.includes("USERS_VIEW")) {
     ctx.addIssue({
       code: "custom",
       path: ["permissions"],
@@ -100,7 +103,7 @@ export async function updateTenantRolePermissions(session: SessionPayload, input
         ),
     )
   ) {
-    throw validationError("Editor can only be granted View users and Edit users.");
+    throw validationError("Editor can only be granted View users, Edit users, and View settings.");
   }
 
   const role = await prisma.role.findUnique({
@@ -174,11 +177,11 @@ export async function requireTenantUserPermission(
   if (session.role === "SUPERADMIN") {
     await requireMainSuperAdmin(session);
     const role = await prisma.role.findUnique({ where: { code: "SUPERADMIN" }, select: { permissions: { select: { permission: true } } } });
-    if (!role?.permissions.some((entry) => entry.permission === permission)) throw forbidden("You do not have permission to perform this user-management action");
+    if (!role?.permissions.some((entry) => entry.permission === permission)) throw forbidden("You do not have permission to perform this action");
     return;
   }
   const permissions = await getTenantUserPermissions(session);
   if (!permissions.includes(permission)) {
-    throw forbidden("You do not have permission to perform this user-management action");
+    throw forbidden("You do not have permission to perform this action");
   }
 }

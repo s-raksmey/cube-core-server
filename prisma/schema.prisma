@@ -65,6 +65,7 @@ model Tenant {
   localDevelopmentAssignment LocalDevelopmentTenant?
   status           TenantStatus         @default(ACTIVE)
   settings         Json                 @default("{}")
+  branding         TenantBranding?
   memberships      TenantMembership[]
   sessions         UserSession[]
   challenges       AuthLoginChallenge[]
@@ -76,6 +77,20 @@ model Tenant {
   @@index([parentTenantUuid])
   @@index([type, status])
   @@map("tenants")
+}
+
+model TenantBranding {
+  tenantUuid          String   @id @map("tenant_uuid")
+  tenant              Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  managementLogoPath  String?  @map("management_logo_path")
+  websiteLogoPath     String?  @map("website_logo_path")
+  faviconPath         String?  @map("favicon_path")
+  publicWebsiteFaviconPath String? @map("public_website_favicon_path")
+  openGraphImagePath  String?  @map("open_graph_image_path")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("tenant_branding")
 }
 
 model TenantDomain {

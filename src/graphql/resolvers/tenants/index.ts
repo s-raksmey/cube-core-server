@@ -11,6 +11,7 @@ import { tenantsDomainsResolver } from "@/src/graphql/resolvers/tenants/tenants-
 import { tenantsUpdateResolver } from "@/src/graphql/resolvers/tenants/tenants-update-resolver";
 import { tenantsManagedUsersResolver } from "@/src/graphql/resolvers/tenants/tenants-managed-users-resolver";
 import { tenantsResolveLocalDevelopmentResolver } from "@/src/graphql/resolvers/tenants/tenants-resolve-local-development-resolver";
+import { tenantsBrandingResolver } from "@/src/graphql/resolvers/tenants/tenants-branding-resolver";
 
 export const tenantsResolvers = mergeResolvers(
   tenantsListResolver,
@@ -25,4 +26,5 @@ export const tenantsResolvers = mergeResolvers(
   tenantsUpdateResolver,
   tenantsManagedUsersResolver,
   tenantsResolveLocalDevelopmentResolver,
+  tenantsBrandingResolver,
 );

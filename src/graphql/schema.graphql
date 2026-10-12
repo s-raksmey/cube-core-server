@@ -59,6 +59,16 @@ enum TenantUserPermission {
   USERS_SUSPEND
   USERS_RESET_PASSWORD
   USERS_DELETE
+  BRANDING_VIEW
+  BRANDING_UPDATE
+}
+
+enum BrandingAsset {
+  MANAGEMENT_LOGO
+  WEBSITE_LOGO
+  FAVICON
+  PUBLIC_WEBSITE_FAVICON
+  OPEN_GRAPH_IMAGE
 }
 
 enum UserManagementRole {
@@ -94,6 +104,15 @@ type Tenant {
   userCount: Int
 }
 
+type TenantBranding {
+  tenantId: ID!
+  managementLogoUrl: String
+  websiteLogoUrl: String
+  faviconUrl: String
+  publicWebsiteFaviconUrl: String
+  openGraphImageUrl: String
+}
+
 type TenantDomainVerification {
   purpose: TenantDomainPurpose!
   hostname: String!
@@ -111,12 +130,22 @@ type TenantDomainResolution {
   status: TenantStatus!
   managementDomain: String
   websiteDomain: String
+  managementLogoUrl: String
+  websiteLogoUrl: String
+  faviconUrl: String
+  publicWebsiteFaviconUrl: String
+  openGraphImageUrl: String
 }
 
 type PublicTenantBranding {
   id: ID!
   name: String!
   slug: String!
+  managementLogoUrl: String
+  websiteLogoUrl: String
+  faviconUrl: String
+  publicWebsiteFaviconUrl: String
+  openGraphImageUrl: String
 }
 
 input UpdateSubTenantInput {
@@ -349,6 +378,9 @@ type RefreshSessionPayload {
 }
 
 type Query {
+  tenantBranding(tenantId: ID!): TenantBranding!
+  myTenantBranding: TenantBranding!
+  mainTenantBranding: TenantBranding!
   tenantRolePermissions: [TenantRolePermissions!]!
   tenantRolePermissionSummary: [TenantRolePermissions!]!
   tenantUserPermissions: [TenantUserPermission!]!
@@ -376,6 +408,9 @@ type Query {
 }
 
 type Mutation {
+  updateTenantBranding(tenantId: ID!, asset: BrandingAsset!, fileName: String!, mimeType: String!, contentBase64: String): TenantBranding!
+  updateMyTenantBranding(asset: BrandingAsset!, fileName: String!, mimeType: String!, contentBase64: String): TenantBranding!
+  updateMainTenantBranding(asset: BrandingAsset!, fileName: String!, mimeType: String!, contentBase64: String): TenantBranding!
   updateTenantRolePermissions(input: UpdateTenantRolePermissionsInput!): TenantRolePermissions!
   login(
     email: String!

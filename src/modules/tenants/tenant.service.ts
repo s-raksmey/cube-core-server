@@ -39,6 +39,7 @@ import {
   findAccountByUuid,
 } from "@/src/modules/users/account";
 import { requireTenantUserPermission, type TenantUserPermission } from "@/src/modules/roles/role-permission.service";
+import { brandingAssetUrl } from "@/src/modules/tenants/tenant-branding.service";
 
 function optionalHostname() {
   return z.preprocess(
@@ -472,19 +473,24 @@ export async function resolveSubTenantByHostname(
     status: tenant.status,
     managementDomain,
     websiteDomain,
+    managementLogoUrl: brandingAssetUrl(tenant.branding?.managementLogoPath ?? null),
+    websiteLogoUrl: brandingAssetUrl(tenant.branding?.websiteLogoPath ?? null),
+    faviconUrl: brandingAssetUrl(tenant.branding?.faviconPath ?? null),
+    publicWebsiteFaviconUrl: brandingAssetUrl(tenant.branding?.publicWebsiteFaviconPath ?? null),
+    openGraphImageUrl: brandingAssetUrl(tenant.branding?.openGraphImagePath ?? null),
   };
 }
 
 export async function resolveSubTenantBySlug(slug: string) {
   const tenant = await findActiveTenantBySlug(slug);
   if (!tenant || tenant.type !== TenantType.SUB) return null;
-  return { id: tenant.uuid, name: tenant.name, slug: tenant.slug };
+  return { id: tenant.uuid, name: tenant.name, slug: tenant.slug, managementLogoUrl: brandingAssetUrl(tenant.branding?.managementLogoPath ?? null), websiteLogoUrl: brandingAssetUrl(tenant.branding?.websiteLogoPath ?? null), faviconUrl: brandingAssetUrl(tenant.branding?.faviconPath ?? null), publicWebsiteFaviconUrl: brandingAssetUrl(tenant.branding?.publicWebsiteFaviconPath ?? null), openGraphImageUrl: brandingAssetUrl(tenant.branding?.openGraphImagePath ?? null) };
 }
 
 export async function resolveSubTenantById(id: string) {
   const tenant = await findActiveTenantById(id);
   if (!tenant || tenant.type !== TenantType.SUB) return null;
-  return { id: tenant.uuid, name: tenant.name, slug: tenant.slug };
+  return { id: tenant.uuid, name: tenant.name, slug: tenant.slug, managementLogoUrl: brandingAssetUrl(tenant.branding?.managementLogoPath ?? null), websiteLogoUrl: brandingAssetUrl(tenant.branding?.websiteLogoPath ?? null), faviconUrl: brandingAssetUrl(tenant.branding?.faviconPath ?? null), publicWebsiteFaviconUrl: brandingAssetUrl(tenant.branding?.publicWebsiteFaviconPath ?? null), openGraphImageUrl: brandingAssetUrl(tenant.branding?.openGraphImagePath ?? null) };
 }
 
 async function findSubTenantDomain(tenantId: string, purpose: TenantDomainPurpose) {

@@ -125,6 +125,7 @@ export async function findActiveTenantByHostname(
           slug: true,
           type: true,
           status: true,
+          branding: { select: { managementLogoPath: true, websiteLogoPath: true, faviconPath: true, publicWebsiteFaviconPath: true, openGraphImagePath: true } },
           domains: {
             where: { status: TenantDomainStatus.ACTIVE },
             select: { purpose: true, hostname: true, status: true },
@@ -155,6 +156,7 @@ export async function findActiveTenantBySlug(slug: string) {
       slug: true,
       type: true,
       status: true,
+      branding: { select: { managementLogoPath: true, websiteLogoPath: true, faviconPath: true, publicWebsiteFaviconPath: true, openGraphImagePath: true } },
     },
   });
 }
@@ -177,6 +179,7 @@ export async function findActiveTenantById(id: string) {
       slug: true,
       type: true,
       status: true,
+      branding: { select: { managementLogoPath: true, websiteLogoPath: true, faviconPath: true, publicWebsiteFaviconPath: true, openGraphImagePath: true } },
     },
   });
 }

@@ -21,11 +21,14 @@ const DEFAULT_ADMIN_USER_PERMISSIONS = [
   "USERS_ACTIVATE",
   "USERS_SUSPEND",
   "USERS_RESET_PASSWORD",
+  "BRANDING_VIEW",
+  "BRANDING_UPDATE",
 ] as const;
 
 const DEFAULT_EDITOR_USER_PERMISSIONS = [
   "USERS_VIEW",
   "USERS_EDIT",
+  "BRANDING_VIEW",
 ] as const;
 
 async function ensureRoles() {
