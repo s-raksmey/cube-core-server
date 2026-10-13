@@ -87,6 +87,17 @@ export async function generateMainTenantUserPasswordResetLink(
   };
 }
 
+export async function getMainTenantUserPasswordResetLink(session: SessionPayload, targetUserUuid: string) {
+  if (session.role !== "SUPERADMIN") throw forbidden("Only SuperAdmin can view password reset links");
+  assertNotSelfPasswordReset(session.userId, targetUserUuid);
+  const target = await findAccountByUuid(targetUserUuid);
+  if (!target || target.tenant.type !== TenantType.MAIN || target.roleCode !== "SUPERADMIN") throw validationError("User not found");
+  const existing = await findExistingPasswordResetToken(target.uuid);
+  if (!existing?.encryptedToken) return null;
+  const baseUrl = (process.env.ADMIN_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  return { resetUrl: `${baseUrl}/password-reset?token=${encodeURIComponent(decryptPasswordResetToken(existing.encryptedToken))}`, expiresAt: existing.expiresAt.toISOString() };
+}
+
 /** Sub-tenant password reset for a permitted tenant user or Main SuperAdmin. */
 export async function generateSubTenantUserPasswordResetLink(
   session: SessionPayload,
@@ -141,6 +152,20 @@ export async function generateSubTenantUserPasswordResetLink(
     expiresAt: expiresAt.toISOString(),
     user: mapAuthUser(target),
   };
+}
+
+export async function getSubTenantUserPasswordResetLink(session: SessionPayload, targetUserUuid: string) {
+  if (session.audience !== "TENANT_APP" && session.role !== "SUPERADMIN") throw forbidden("Only an authorized tenant user can view password reset links");
+  await requireTenantUserPermission(session, "USERS_RESET_PASSWORD");
+  assertNotSelfPasswordReset(session.userId, targetUserUuid);
+  const target = await findAccountByUuid(targetUserUuid);
+  if (!target || target.tenant.type !== TenantType.SUB) throw validationError("User not found");
+  if (session.role !== "SUPERADMIN" && target.tenantUuid !== session.tenantId) throw forbidden("You can only manage users in your own tenant");
+  const existing = await findExistingPasswordResetToken(target.uuid);
+  if (!existing?.encryptedToken) return null;
+  const managementHostname = await findManagementHostname(target.tenantUuid);
+  const baseUrl = managementAppBaseUrl(managementHostname, process.env.TENANT_APP_URL ?? "http://localhost:3001");
+  return { resetUrl: `${baseUrl}/password-reset?token=${encodeURIComponent(decryptPasswordResetToken(existing.encryptedToken))}`, expiresAt: existing.expiresAt.toISOString() };
 }
 
 export async function validatePasswordResetToken(token: string) {

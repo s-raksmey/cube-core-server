@@ -238,6 +238,11 @@ type ExistingActivationLinkPayload {
   expiresAt: String!
 }
 
+type ExistingPasswordResetLinkPayload {
+  resetUrl: String!
+  expiresAt: String!
+}
+
 input UpdateMainTenantUserInput {
   firstName: String
   lastName: String
@@ -388,6 +393,9 @@ type Query {
   mainTenantUserActivationLink(userId: ID!): ExistingActivationLinkPayload
   subTenantUserActivationLink(tenantId: ID!, userId: ID!): ExistingActivationLinkPayload
   tenantUserActivationLink(userId: ID!): ExistingActivationLinkPayload
+  mainTenantUserPasswordResetLink(userId: ID!): ExistingPasswordResetLinkPayload
+  subTenantUserPasswordResetLink(tenantId: ID!, userId: ID!): ExistingPasswordResetLinkPayload
+  tenantUserPasswordResetLink(userId: ID!): ExistingPasswordResetLinkPayload
   me: User
   platformDashboard: PlatformDashboard!
   tenantDashboard: TenantDashboard!

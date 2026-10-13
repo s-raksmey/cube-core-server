@@ -3,6 +3,7 @@ import { requireSession } from "@/src/graphql/helpers";
 import {
   updateManagedSubTenantUser,
   generateManagedSubTenantUserPasswordResetLink,
+  getManagedSubTenantUserPasswordResetLink,
   deleteManagedSubTenantUser,
 } from "@/src/modules/tenants/tenant-user-management.service";
 import {
@@ -13,6 +14,7 @@ import { listManagedSubTenantUsers } from "@/src/modules/tenants/tenant-user-que
 
 export const tenantsManagedUsersResolver = {
   Query: {
+    subTenantUserPasswordResetLink: (_: unknown, args: { tenantId: string; userId: string }, ctx: GraphQLContext) => getManagedSubTenantUserPasswordResetLink(requireSession(ctx), args.tenantId, args.userId),
     subTenantUserActivationLink: async (
       _: unknown,
       args: { tenantId: string; userId: string },

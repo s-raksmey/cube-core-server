@@ -8,7 +8,7 @@ import { prisma } from "@/src/lib/db";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden, validationError } from "@/src/lib/errors";
 import { createActivationToken } from "@/src/modules/auth/activation.service";
-import { generateSubTenantUserPasswordResetLink } from "@/src/modules/auth/password-reset.service";
+import { generateSubTenantUserPasswordResetLink, getSubTenantUserPasswordResetLink } from "@/src/modules/auth/password-reset.service";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import {
   findAccountByUuid,
@@ -250,6 +250,11 @@ export async function updateManagedSubTenantUser(
 export async function generateManagedSubTenantUserPasswordResetLink(session: SessionPayload, tenantId: string, userId: string) {
   const membership = await requireManagedSubTenantUser(session, tenantId, userId, "USERS_RESET_PASSWORD");
   return generateSubTenantUserPasswordResetLink(session, membership.userUuid);
+}
+
+export async function getManagedSubTenantUserPasswordResetLink(session: SessionPayload, tenantId: string, userId: string) {
+  await requireManagedSubTenantUser(session, tenantId, userId, "USERS_RESET_PASSWORD");
+  return getSubTenantUserPasswordResetLink(session, userId);
 }
 
 export async function deleteManagedSubTenantUser(session: SessionPayload, tenantId: string, userId: string) {
