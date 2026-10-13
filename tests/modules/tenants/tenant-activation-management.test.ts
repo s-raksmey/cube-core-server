@@ -59,9 +59,9 @@ vi.mock("@/src/modules/users/account", () => ({
 
 import {
   getSubTenantUserActivationLink,
-  listManagedSubTenantUsers,
   regenerateSubTenantUserActivationLink,
-} from "@/src/modules/tenants/tenant.service";
+} from "@/src/modules/tenants/tenant-user-activation.service";
+import { listManagedSubTenantUsers } from "@/src/modules/tenants/tenant-user-query.service";
 
 const superAdminSession = {
   userId: "11111111-1111-4111-8111-111111111111",

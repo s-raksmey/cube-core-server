@@ -2,7 +2,7 @@ import {
   resolveSubTenantById,
   resolveSubTenantByHostname,
   resolveSubTenantBySlug,
-} from "@/src/modules/tenants/tenant.service";
+} from "@/src/modules/tenants/tenant-public-resolution.service";
 import type { TenantDomainPurpose } from "@prisma/client";
 
 /** Public hostname lookup identifies a tenant; it grants no access to tenant data. */

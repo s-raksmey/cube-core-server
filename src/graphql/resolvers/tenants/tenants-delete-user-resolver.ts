@@ -1,6 +1,14 @@
 import type { GraphQLContext } from "@/src/graphql/context";
 import { requireSession } from "@/src/graphql/helpers";
-import { deleteTenantUser, generateTenantUserActivationLink, generateTenantUserPasswordResetLink, getTenantUserActivationLink, updateTenantUser } from "@/src/modules/tenants/tenant.service";
+import {
+  deleteTenantUser,
+  generateTenantUserPasswordResetLink,
+  updateTenantUser,
+} from "@/src/modules/tenants/tenant-user-management.service";
+import {
+  generateTenantUserActivationLink,
+  getTenantUserActivationLink,
+} from "@/src/modules/tenants/tenant-user-activation.service";
 
 export const tenantsDeleteUserResolver = {
   Query: {

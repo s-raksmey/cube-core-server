@@ -381,6 +381,7 @@ type Query {
   tenantBranding(tenantId: ID!): TenantBranding!
   myTenantBranding: TenantBranding!
   mainTenantBranding: TenantBranding!
+  publicMainTenantBranding: TenantBranding!
   tenantRolePermissions: [TenantRolePermissions!]!
   tenantRolePermissionSummary: [TenantRolePermissions!]!
   tenantUserPermissions: [TenantUserPermission!]!

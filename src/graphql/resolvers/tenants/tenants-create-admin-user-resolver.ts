@@ -1,6 +1,6 @@
 import type { GraphQLContext } from "@/src/graphql/context";
 import { requireSession } from "@/src/graphql/helpers";
-import { createAdminUser } from "@/src/modules/tenants/tenant.service";
+import { createAdminUser } from "@/src/modules/tenants/tenant-user-management.service";
 
 export const tenantsCreateAdminUserResolver = {
   Mutation: {

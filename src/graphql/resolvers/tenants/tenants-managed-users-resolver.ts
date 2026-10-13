@@ -1,13 +1,15 @@
 import type { GraphQLContext } from "@/src/graphql/context";
 import { requireSession } from "@/src/graphql/helpers";
 import {
-  listManagedSubTenantUsers,
-  getSubTenantUserActivationLink,
-  regenerateSubTenantUserActivationLink,
   updateManagedSubTenantUser,
   generateManagedSubTenantUserPasswordResetLink,
   deleteManagedSubTenantUser,
-} from "@/src/modules/tenants/tenant.service";
+} from "@/src/modules/tenants/tenant-user-management.service";
+import {
+  getSubTenantUserActivationLink,
+  regenerateSubTenantUserActivationLink,
+} from "@/src/modules/tenants/tenant-user-activation.service";
+import { listManagedSubTenantUsers } from "@/src/modules/tenants/tenant-user-query.service";
 
 export const tenantsManagedUsersResolver = {
   Query: {

@@ -84,6 +84,22 @@ export async function getMainTenantBranding(session: SessionPayload) {
   return map(row);
 }
 
+/** Public identity assets are needed on the Main Tenant sign-in landing page. */
+export async function getPublicMainTenantBranding() {
+  const tenant = await prisma.tenant.findFirst({
+    where: { type: TenantType.MAIN, deletedAt: null },
+    select: { uuid: true },
+  });
+  if (!tenant) throw validationError("Main tenant not found");
+
+  const row = await prisma.tenantBranding.upsert({
+    where: { tenantUuid: tenant.uuid },
+    create: { tenantUuid: tenant.uuid },
+    update: {},
+  });
+  return map(row);
+}
+
 async function saveBrandingAsset(
   id: string,
   input: { asset: BrandingAsset; fileName: string; mimeType: string; contentBase64?: string | null },

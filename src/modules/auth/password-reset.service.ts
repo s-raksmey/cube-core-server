@@ -1,8 +1,6 @@
 import { TenantType, UserStatus } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/src/lib/db";
-import { PASSWORD_RESET_TTL_MS } from "@/src/lib/auth/constants";
-import { decryptAtRest, encryptAtRest, hashToken, randomToken } from "@/src/lib/auth/crypto";
 import {
   hashPassword,
   passwordPolicySchema,
@@ -17,6 +15,12 @@ import {
 } from "@/src/modules/tenants/tenant-domain.service";
 import { findAccountByUuid, mapAuthUser } from "@/src/modules/users/account";
 import { requireTenantUserPermission } from "@/src/modules/roles/role-permission.service";
+import {
+  createPasswordResetToken,
+  decryptPasswordResetToken,
+  findExistingPasswordResetToken,
+  findValidPasswordResetToken,
+} from "@/src/modules/auth/password-reset-token.service";
 
 export function assertNotSelfPasswordReset(
   actorUserId: string,
@@ -53,35 +57,16 @@ export async function generateMainTenantUserPasswordResetLink(
     throw validationError("Cannot reset password for an inactive user");
   }
 
-  const existing = await prisma.userPasswordResetToken.findFirst({
-    where: { userUuid: target.uuid, usedAt: null, revokedAt: null, expiresAt: { gt: new Date() }, encryptedToken: { not: null } },
-    orderBy: { createdAt: "desc" },
-    select: { encryptedToken: true, expiresAt: true },
-  });
+  const existing = await findExistingPasswordResetToken(target.uuid);
   const baseUrl = (process.env.ADMIN_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
   if (existing?.encryptedToken) {
-    return { resetUrl: `${baseUrl}/password-reset?token=${encodeURIComponent(decryptAtRest(existing.encryptedToken))}`, expiresAt: existing.expiresAt.toISOString(), user: mapAuthUser(target) };
+    return { resetUrl: `${baseUrl}/password-reset?token=${encodeURIComponent(decryptPasswordResetToken(existing.encryptedToken))}`, expiresAt: existing.expiresAt.toISOString(), user: mapAuthUser(target) };
   }
 
-  const rawToken = randomToken(32);
-  const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
-
-  await prisma.$transaction([
-    prisma.userPasswordResetToken.updateMany({
-      where: { userUuid: target.uuid, usedAt: null, revokedAt: null },
-      data: { revokedAt: new Date() },
-    }),
-    prisma.userPasswordResetToken.create({
-      data: {
-        userUuid: target.uuid,
-        tokenHash,
-        encryptedToken: encryptAtRest(rawToken),
-        expiresAt,
-        createdByUuid: session.userId,
-      },
-    }),
-  ]);
+  const { rawToken, expiresAt } = await createPasswordResetToken({
+    userUuid: target.uuid,
+    createdByUuid: session.userId,
+  });
 
   const resetUrl = `${baseUrl}/password-reset?token=${encodeURIComponent(rawToken)}`;
 
@@ -127,36 +112,17 @@ export async function generateSubTenantUserPasswordResetLink(
     throw forbidden("You can only manage users in your own tenant");
   }
 
-  const existing = await prisma.userPasswordResetToken.findFirst({
-    where: { userUuid: target.uuid, usedAt: null, revokedAt: null, expiresAt: { gt: new Date() }, encryptedToken: { not: null } },
-    orderBy: { createdAt: "desc" },
-    select: { encryptedToken: true, expiresAt: true },
-  });
+  const existing = await findExistingPasswordResetToken(target.uuid);
   const managementHostname = await findManagementHostname(target.tenantUuid);
   const baseUrl = managementAppBaseUrl(managementHostname, process.env.TENANT_APP_URL ?? "http://localhost:3001");
   if (existing?.encryptedToken) {
-    return { resetUrl: `${baseUrl}/password-reset?token=${encodeURIComponent(decryptAtRest(existing.encryptedToken))}`, expiresAt: existing.expiresAt.toISOString(), user: mapAuthUser(target) };
+    return { resetUrl: `${baseUrl}/password-reset?token=${encodeURIComponent(decryptPasswordResetToken(existing.encryptedToken))}`, expiresAt: existing.expiresAt.toISOString(), user: mapAuthUser(target) };
   }
 
-  const rawToken = randomToken(32);
-  const tokenHash = hashToken(rawToken);
-  const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
-
-  await prisma.$transaction([
-    prisma.userPasswordResetToken.updateMany({
-      where: { userUuid: target.uuid, usedAt: null, revokedAt: null },
-      data: { revokedAt: new Date() },
-    }),
-    prisma.userPasswordResetToken.create({
-      data: {
-        userUuid: target.uuid,
-        tokenHash,
-        encryptedToken: encryptAtRest(rawToken),
-        expiresAt,
-        createdByUuid: session.userId,
-      },
-    }),
-  ]);
+  const { rawToken, expiresAt } = await createPasswordResetToken({
+    userUuid: target.uuid,
+    createdByUuid: session.userId,
+  });
 
   const resetUrl = `${baseUrl}/password-reset?token=${encodeURIComponent(rawToken)}`;
 
@@ -178,11 +144,8 @@ export async function generateSubTenantUserPasswordResetLink(
 }
 
 export async function validatePasswordResetToken(token: string) {
-  const tokenHash = hashToken(token);
-  const row = await prisma.userPasswordResetToken.findUnique({
-    where: { tokenHash },
-  });
-  if (!row || row.usedAt || row.revokedAt || row.expiresAt < new Date()) {
+  const row = await findValidPasswordResetToken(token);
+  if (!row) {
     throw unauthenticated("Invalid or expired reset link");
   }
   const account = await findAccountByUuid(row.userUuid);
@@ -215,11 +178,8 @@ export async function completePasswordReset(input: {
     throw validationError(parsedPassword.error.issues[0]?.message ?? "Invalid password");
   }
 
-  const tokenHash = hashToken(input.token);
-  const row = await prisma.userPasswordResetToken.findUnique({
-    where: { tokenHash },
-  });
-  if (!row || row.usedAt || row.revokedAt || row.expiresAt < new Date()) {
+  const row = await findValidPasswordResetToken(input.token);
+  if (!row) {
     throw unauthenticated("Invalid or expired reset link");
   }
 

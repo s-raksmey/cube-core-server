@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createAdminUser, createSubTenant, getSubTenant } from "@/src/modules/tenants/tenant.service";
+import { createSubTenant, getSubTenant } from "@/src/modules/tenants/tenant.service";
+import { createAdminUser } from "@/src/modules/tenants/tenant-user-management.service";
 import type { SessionPayload } from "@/src/lib/auth/session";
 
 const adminSession = {

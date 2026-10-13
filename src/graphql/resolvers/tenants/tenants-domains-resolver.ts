@@ -5,7 +5,7 @@ import {
   activateTenantDomain,
   checkTenantDomainVerification,
   startTenantDomainVerification,
-} from "@/src/modules/tenants/tenant.service";
+} from "@/src/modules/tenants/tenant-domain-management.service";
 
 export const tenantsDomainsResolver = {
   Mutation: {

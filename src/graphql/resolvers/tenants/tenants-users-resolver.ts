@@ -1,6 +1,6 @@
 import type { GraphQLContext } from "@/src/graphql/context";
 import { requireSession } from "@/src/graphql/helpers";
-import { listTenantUsers } from "@/src/modules/tenants/tenant.service";
+import { listTenantUsers } from "@/src/modules/tenants/tenant-user-query.service";
 
 export const tenantsUsersResolver = {
   Query: {
