@@ -31,6 +31,13 @@ const DEFAULT_EDITOR_USER_PERMISSIONS = [
   "BRANDING_VIEW",
 ] as const;
 
+const DEFAULT_ADMIN_CATEGORY_PERMISSIONS = [
+  "CATEGORY_VIEW", "CATEGORY_VIEW_SUBCATEGORY", "CATEGORY_CREATE", "CATEGORY_CREATE_SUBCATEGORY",
+  "CATEGORY_EDIT", "CATEGORY_EDIT_SUBCATEGORY", "CATEGORY_DELETE", "CATEGORY_DELETE_SUBCATEGORY",
+] as const;
+
+const DEFAULT_EDITOR_CATEGORY_PERMISSIONS = ["CATEGORY_VIEW", "CATEGORY_VIEW_SUBCATEGORY"] as const;
+
 async function ensureRoles() {
   const roles = [
     {
@@ -66,6 +73,10 @@ async function ensureRoles() {
     if (count === 0) await prisma.rolePermission.createMany({
       data: DEFAULT_ADMIN_USER_PERMISSIONS.map((permission) => ({ roleUuid, permission })),
     });
+    await prisma.rolePermission.createMany({
+      data: DEFAULT_ADMIN_CATEGORY_PERMISSIONS.map((permission) => ({ roleUuid, permission })),
+      skipDuplicates: true,
+    });
   }
 
   const editorPermissionCount = await prisma.rolePermission.count({
@@ -79,6 +90,10 @@ async function ensureRoles() {
       })),
     });
   }
+  await prisma.rolePermission.createMany({
+    data: DEFAULT_EDITOR_CATEGORY_PERMISSIONS.map((permission) => ({ roleUuid: ROLE_IDS.EDITOR, permission })),
+    skipDuplicates: true,
+  });
 }
 
 async function main() {

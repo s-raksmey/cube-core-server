@@ -16,6 +16,14 @@ export const tenantUserPermissionCodes = [
   "USERS_DELETE",
   "BRANDING_VIEW",
   "BRANDING_UPDATE",
+  "CATEGORY_VIEW",
+  "CATEGORY_VIEW_SUBCATEGORY",
+  "CATEGORY_CREATE",
+  "CATEGORY_CREATE_SUBCATEGORY",
+  "CATEGORY_EDIT",
+  "CATEGORY_EDIT_SUBCATEGORY",
+  "CATEGORY_DELETE",
+  "CATEGORY_DELETE_SUBCATEGORY",
 ] as const;
 
 export type TenantUserPermission = (typeof tenantUserPermissionCodes)[number];
@@ -25,6 +33,8 @@ export const allowedEditorUserPermissions = [
   "USERS_VIEW",
   "USERS_EDIT",
   "BRANDING_VIEW",
+  "CATEGORY_VIEW",
+  "CATEGORY_VIEW_SUBCATEGORY",
 ] as const satisfies readonly TenantUserPermission[];
 
 const updateRolePermissionsSchema = z.object({
@@ -43,6 +53,18 @@ const updateRolePermissionsSchema = z.object({
       path: ["permissions"],
       message: "View users is required for every other user-management permission",
     });
+  }
+  const hasCategoryAction = value.permissions.some(
+    (permission) => permission.startsWith("CATEGORY_") && permission !== "CATEGORY_VIEW" && permission !== "CATEGORY_VIEW_SUBCATEGORY",
+  );
+  if (hasCategoryAction && !value.permissions.includes("CATEGORY_VIEW")) {
+    ctx.addIssue({ code: "custom", path: ["permissions"], message: "View category is required for category management permissions" });
+  }
+  const hasSubcategoryAction = value.permissions.some(
+    (permission) => permission.endsWith("SUBCATEGORY") && permission !== "CATEGORY_VIEW_SUBCATEGORY",
+  );
+  if (hasSubcategoryAction && !value.permissions.includes("CATEGORY_VIEW_SUBCATEGORY")) {
+    ctx.addIssue({ code: "custom", path: ["permissions"], message: "View sub category is required for sub category management permissions" });
   }
 });
 
@@ -103,7 +125,7 @@ export async function updateTenantRolePermissions(session: SessionPayload, input
         ),
     )
   ) {
-    throw validationError("Editor can only be granted View users, Edit users, and View settings.");
+    throw validationError("Editor can only be granted view permissions for users, categories, and settings.");
   }
 
   const role = await prisma.role.findUnique({
@@ -157,17 +179,26 @@ export async function getTenantUserPermissions(session: SessionPayload) {
     select: {
       role: {
         select: {
+          code: true,
           permissions: { select: { permission: true } },
         },
       },
     },
   });
   if (!membership) throw forbidden("You do not have access to this tenant");
-  return membership.role.permissions
+  const permissions = membership.role.permissions
     .map((entry) => entry.permission)
     .filter((permission): permission is TenantUserPermission =>
       tenantUserPermissionCodes.includes(permission as TenantUserPermission),
     );
+
+  return membership.role.code === "EDITOR"
+    ? permissions.filter((permission) =>
+        (allowedEditorUserPermissions as readonly TenantUserPermission[]).includes(
+          permission,
+        ),
+      )
+    : permissions;
 }
 
 export async function requireTenantUserPermission(

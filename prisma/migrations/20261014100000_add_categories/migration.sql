@@ -1,0 +1,17 @@
+CREATE TABLE "categories" ("uuid" TEXT NOT NULL, "tenant_uuid" TEXT NOT NULL, "slug" TEXT NOT NULL, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "categories_pkey" PRIMARY KEY ("uuid"));
+CREATE TABLE "category_translations" ("uuid" TEXT NOT NULL, "category_uuid" TEXT NOT NULL, "locale" TEXT NOT NULL, "name" TEXT NOT NULL, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "category_translations_pkey" PRIMARY KEY ("uuid"));
+CREATE TABLE "subcategories" ("uuid" TEXT NOT NULL, "tenant_uuid" TEXT NOT NULL, "category_uuid" TEXT NOT NULL, "slug" TEXT NOT NULL, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "subcategories_pkey" PRIMARY KEY ("uuid"));
+CREATE TABLE "subcategory_translations" ("uuid" TEXT NOT NULL, "subcategory_uuid" TEXT NOT NULL, "locale" TEXT NOT NULL, "name" TEXT NOT NULL, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "subcategory_translations_pkey" PRIMARY KEY ("uuid"));
+CREATE UNIQUE INDEX "categories_tenant_uuid_slug_key" ON "categories"("tenant_uuid", "slug");
+CREATE UNIQUE INDEX "category_translations_category_uuid_locale_key" ON "category_translations"("category_uuid", "locale");
+CREATE UNIQUE INDEX "subcategories_tenant_uuid_category_uuid_slug_key" ON "subcategories"("tenant_uuid", "category_uuid", "slug");
+CREATE UNIQUE INDEX "subcategory_translations_subcategory_uuid_locale_key" ON "subcategory_translations"("subcategory_uuid", "locale");
+CREATE INDEX "categories_tenant_uuid_idx" ON "categories"("tenant_uuid");
+CREATE INDEX "category_translations_locale_idx" ON "category_translations"("locale");
+CREATE INDEX "subcategories_tenant_uuid_category_uuid_idx" ON "subcategories"("tenant_uuid", "category_uuid");
+CREATE INDEX "subcategory_translations_locale_idx" ON "subcategory_translations"("locale");
+ALTER TABLE "categories" ADD CONSTRAINT "categories_tenant_uuid_fkey" FOREIGN KEY ("tenant_uuid") REFERENCES "tenants"("uuid") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "category_translations" ADD CONSTRAINT "category_translations_category_uuid_fkey" FOREIGN KEY ("category_uuid") REFERENCES "categories"("uuid") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "subcategories" ADD CONSTRAINT "subcategories_tenant_uuid_fkey" FOREIGN KEY ("tenant_uuid") REFERENCES "tenants"("uuid") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "subcategories" ADD CONSTRAINT "subcategories_category_uuid_fkey" FOREIGN KEY ("category_uuid") REFERENCES "categories"("uuid") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "subcategory_translations" ADD CONSTRAINT "subcategory_translations_subcategory_uuid_fkey" FOREIGN KEY ("subcategory_uuid") REFERENCES "subcategories"("uuid") ON DELETE CASCADE ON UPDATE CASCADE;

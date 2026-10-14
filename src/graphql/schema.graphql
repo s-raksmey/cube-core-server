@@ -61,7 +61,26 @@ enum TenantUserPermission {
   USERS_DELETE
   BRANDING_VIEW
   BRANDING_UPDATE
+  CATEGORY_VIEW
+  CATEGORY_VIEW_SUBCATEGORY
+  CATEGORY_CREATE
+  CATEGORY_CREATE_SUBCATEGORY
+  CATEGORY_EDIT
+  CATEGORY_EDIT_SUBCATEGORY
+  CATEGORY_DELETE
+  CATEGORY_DELETE_SUBCATEGORY
 }
+
+input TranslationInput { locale: String!, name: String! }
+input CreateCategoryInput { slug: String!, translations: [TranslationInput!]! }
+input UpdateCategoryInput { slug: String, translations: [TranslationInput!] }
+input CreateSubcategoryInput { categoryId: ID!, slug: String!, translations: [TranslationInput!]! }
+input UpdateSubcategoryInput { slug: String, translations: [TranslationInput!] }
+
+type CategoryTranslation { locale: String!, name: String! }
+type SubcategoryTranslation { locale: String!, name: String! }
+type Category { id: ID!, slug: String!, name: String!, translations: [CategoryTranslation!]!, subcategories: [Subcategory!]!, createdAt: String!, updatedAt: String! }
+type Subcategory { id: ID!, categoryId: ID!, slug: String!, translations: [SubcategoryTranslation!]!, createdAt: String!, updatedAt: String! }
 
 enum BrandingAsset {
   MANAGEMENT_LOGO
@@ -420,6 +439,10 @@ type Query {
   tenantDashboard: TenantDashboard!
   platformAuditLogs(page: Int): AuditLogPage!
   tenantAuditLogs(page: Int): AuditLogPage!
+  categories(search: String): [Category!]!
+  category(id: ID!): Category
+  subcategories(categoryId: ID, search: String): [Subcategory!]!
+  subcategory(id: ID!): Subcategory
   subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
   subTenant(id: ID!): Tenant!
   tenantByHostname(
@@ -507,4 +530,10 @@ type Mutation {
   ): CreateMainTenantUserPayload!
   updateMainTenantUser(id: ID!, input: UpdateMainTenantUserInput!): User!
   deleteMainTenantUser(id: ID!): Boolean!
+  createCategory(input: CreateCategoryInput!): Category!
+  updateCategory(id: ID!, input: UpdateCategoryInput!): Category!
+  deleteCategory(id: ID!): Boolean!
+  createSubcategory(input: CreateSubcategoryInput!): Subcategory!
+  updateSubcategory(id: ID!, input: UpdateSubcategoryInput!): Subcategory!
+  deleteSubcategory(id: ID!): Boolean!
 }

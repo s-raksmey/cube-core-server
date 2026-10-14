@@ -1,0 +1,3 @@
+-- This migration was generated before the category tables existed. The indexes
+-- now live with the table-creation migration so a fresh database can replay
+-- the history in order.

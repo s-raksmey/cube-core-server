@@ -70,6 +70,8 @@ model Tenant {
   sessions         UserSession[]
   challenges       AuthLoginChallenge[]
   auditLogs        AuditLog[]
+  categories       Category[]
+  subcategories    Subcategory[]
   createdAt        DateTime             @default(now()) @map("created_at")
   updatedAt        DateTime             @updatedAt @map("updated_at")
   deletedAt        DateTime?            @map("deleted_at")
@@ -77,6 +79,66 @@ model Tenant {
   @@index([parentTenantUuid])
   @@index([type, status])
   @@map("tenants")
+}
+
+model Category {
+  uuid         String                @id @default(uuid()) @map("uuid")
+  tenantUuid   String                @map("tenant_uuid")
+  tenant       Tenant                @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  slug         String
+  name         String
+  translations CategoryTranslation[]
+  subcategories Subcategory[]
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+
+  @@unique([tenantUuid, slug])
+  @@index([tenantUuid])
+  @@map("categories")
+}
+
+model CategoryTranslation {
+  uuid       String   @id @default(uuid()) @map("uuid")
+  categoryUuid String @map("category_uuid")
+  category   Category @relation(fields: [categoryUuid], references: [uuid], onDelete: Cascade)
+  locale     String
+  name       String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([categoryUuid, locale])
+  @@index([locale])
+  @@map("category_translations")
+}
+
+model Subcategory {
+  uuid         String                   @id @default(uuid()) @map("uuid")
+  tenantUuid   String                   @map("tenant_uuid")
+  tenant       Tenant                   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  categoryUuid String                   @map("category_uuid")
+  category     Category                 @relation(fields: [categoryUuid], references: [uuid], onDelete: Cascade)
+  slug         String
+  translations SubcategoryTranslation[]
+  createdAt    DateTime                 @default(now()) @map("created_at")
+  updatedAt    DateTime                 @updatedAt @map("updated_at")
+
+  @@unique([tenantUuid, categoryUuid, slug])
+  @@index([tenantUuid, categoryUuid])
+  @@map("subcategories")
+}
+
+model SubcategoryTranslation {
+  uuid          String      @id @default(uuid()) @map("uuid")
+  subcategoryUuid String    @map("subcategory_uuid")
+  subcategory    Subcategory @relation(fields: [subcategoryUuid], references: [uuid], onDelete: Cascade)
+  locale         String
+  name           String
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  @@unique([subcategoryUuid, locale])
+  @@index([locale])
+  @@map("subcategory_translations")
 }
 
 model TenantBranding {
