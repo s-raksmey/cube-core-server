@@ -5,6 +5,7 @@ import { prisma } from "@/src/lib/db";
 import { forbidden, validationError } from "@/src/lib/errors";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { requireTenantUserPermission } from "@/src/modules/roles/role-permission.service";
+import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 
 export type BrandingAsset = "MANAGEMENT_LOGO" | "WEBSITE_LOGO" | "FAVICON" | "PUBLIC_WEBSITE_FAVICON" | "OPEN_GRAPH_IMAGE";
 const fieldByAsset = { MANAGEMENT_LOGO: "managementLogoPath", WEBSITE_LOGO: "websiteLogoPath", FAVICON: "faviconPath", PUBLIC_WEBSITE_FAVICON: "publicWebsiteFaviconPath", OPEN_GRAPH_IMAGE: "openGraphImagePath" } as const;
@@ -129,11 +130,30 @@ export async function updateMainTenantBranding(
   session: SessionPayload,
   input: { asset: BrandingAsset; fileName: string; mimeType: string; contentBase64?: string | null },
 ) {
-  return saveBrandingAsset(await requireMainTenant(session), input);
+  const tenantId = await requireMainTenant(session);
+  const branding = await saveBrandingAsset(tenantId, input);
+  await writeAuthAudit({
+    action: "tenant.branding.updated",
+    actorUserUuid: session.userId,
+    tenantUuid: tenantId,
+    targetType: "tenant",
+    targetUuid: tenantId,
+    metadata: { asset: input.asset, operation: input.contentBase64 ? "uploaded" : "removed" },
+  });
+  return branding;
 }
 
 export async function updateTenantBranding(session: SessionPayload, tenantId: string, input: { asset: BrandingAsset; fileName: string; mimeType: string; contentBase64?: string | null }, own = false) {
   const id = own ? session.tenantId : tenantId;
   await requireSubTenant(session, id, "BRANDING_UPDATE");
-  return saveBrandingAsset(id, input);
+  const branding = await saveBrandingAsset(id, input);
+  await writeAuthAudit({
+    action: "tenant.branding.updated",
+    actorUserUuid: session.userId,
+    tenantUuid: id,
+    targetType: "tenant",
+    targetUuid: id,
+    metadata: { asset: input.asset, operation: input.contentBase64 ? "uploaded" : "removed" },
+  });
+  return branding;
 }

@@ -1,5 +1,6 @@
 import {
   MembershipStatus,
+  Prisma,
   TenantStatus,
   TenantType,
   UserStatus,
@@ -9,6 +10,115 @@ import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden } from "@/src/lib/errors";
 import { displayFullName } from "@/src/modules/users/account";
 import { getTenantUserPermissions } from "@/src/modules/roles/role-permission.service";
+
+const AUDIT_LOG_PAGE_SIZE = 10;
+
+const auditLogSelect = {
+  uuid: true,
+  action: true,
+  createdAt: true,
+  targetType: true,
+  targetUuid: true,
+  metadata: true,
+  actorUser: { select: { email: true } },
+  tenant: { select: { name: true } },
+} satisfies Prisma.AuditLogSelect;
+
+function auditLogPageNumber(value?: number | null) {
+  return Math.max(1, Math.floor(value ?? 1));
+}
+
+function auditLogSucceeded(action: string) {
+  return !/\.(failed|rejected(?:_[a-z]+)?|locked|denied|error)$/i.test(action);
+}
+
+function auditLogDetails(metadata: Prisma.JsonValue) {
+  if (!metadata || (typeof metadata === "object" && !Array.isArray(metadata) && Object.keys(metadata).length === 0)) {
+    return null;
+  }
+
+  const serialized = JSON.stringify(metadata);
+  return serialized.length > 1_000 ? `${serialized.slice(0, 997)}…` : serialized;
+}
+
+function mapAuditLog(
+  log: Prisma.AuditLogGetPayload<{ select: typeof auditLogSelect }>,
+) {
+  return {
+    id: log.uuid,
+    action: log.action,
+    success: auditLogSucceeded(log.action),
+    createdAt: log.createdAt.toISOString(),
+    actorEmail: log.actorUser?.email ?? null,
+    targetTenantName: log.tenant?.name ?? null,
+    targetType: log.targetType,
+    targetId: log.targetUuid,
+    details: auditLogDetails(log.metadata),
+  };
+}
+
+export async function getPlatformAuditLogs(
+  session: SessionPayload,
+  requestedPage?: number | null,
+) {
+  if (session.role !== "SUPERADMIN") {
+    throw forbidden("Platform audit logs require SuperAdmin");
+  }
+
+  const page = auditLogPageNumber(requestedPage);
+  const [total, logs] = await Promise.all([
+    prisma.auditLog.count(),
+    prisma.auditLog.findMany({
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * AUDIT_LOG_PAGE_SIZE,
+      take: AUDIT_LOG_PAGE_SIZE,
+      select: auditLogSelect,
+    }),
+  ]);
+
+  return {
+    items: logs.map(mapAuditLog),
+    total,
+    page,
+    pageSize: AUDIT_LOG_PAGE_SIZE,
+  };
+}
+
+export async function getTenantAuditLogs(
+  session: SessionPayload,
+  requestedPage?: number | null,
+) {
+  if (session.role !== "ADMIN" && session.role !== "EDITOR") {
+    throw forbidden("Tenant audit logs require Admin or Editor");
+  }
+
+  const page = auditLogPageNumber(requestedPage);
+  const where = {
+    tenantUuid: session.tenantId,
+    // A tenant workspace may not inspect actions performed by a platform user
+    // or another tenant. Keep only events whose actor has membership here.
+    actorUser: {
+      memberships: { some: { tenantUuid: session.tenantId } },
+    },
+  };
+  const [total, logs] = await Promise.all([
+    prisma.auditLog.count({ where }),
+    prisma.auditLog.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * AUDIT_LOG_PAGE_SIZE,
+      take: AUDIT_LOG_PAGE_SIZE,
+      select: auditLogSelect,
+    }),
+  ]);
+
+  return {
+    items: logs.map(mapAuditLog),
+    total,
+    page,
+    pageSize: AUDIT_LOG_PAGE_SIZE,
+  };
+}
 
 function startOfMonthsAgo(months: number) {
   const date = new Date();

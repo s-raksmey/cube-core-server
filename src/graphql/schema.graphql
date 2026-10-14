@@ -311,6 +311,25 @@ type ActivityItem {
   targetTenantSlug: String
 }
 
+type AuditLogItem {
+  id: ID!
+  action: String!
+  success: Boolean!
+  createdAt: String!
+  actorEmail: String
+  targetTenantName: String
+  targetType: String
+  targetId: ID
+  details: String
+}
+
+type AuditLogPage {
+  items: [AuditLogItem!]!
+  total: Int!
+  page: Int!
+  pageSize: Int!
+}
+
 type PlatformDashboard {
   totalSubTenants: Int!
   activeSubTenants: Int!
@@ -399,6 +418,8 @@ type Query {
   me: User
   platformDashboard: PlatformDashboard!
   tenantDashboard: TenantDashboard!
+  platformAuditLogs(page: Int): AuditLogPage!
+  tenantAuditLogs(page: Int): AuditLogPage!
   subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
   subTenant(id: ID!): Tenant!
   tenantByHostname(
