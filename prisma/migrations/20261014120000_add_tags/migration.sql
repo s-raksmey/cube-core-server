@@ -1,0 +1,10 @@
+CREATE TABLE "tags" ("uuid" TEXT NOT NULL, "tenant_uuid" TEXT NOT NULL, "name" TEXT NOT NULL, "slug" TEXT NOT NULL, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "tags_pkey" PRIMARY KEY ("uuid"));
+CREATE TABLE "tag_translations" ("uuid" TEXT NOT NULL, "tag_uuid" TEXT NOT NULL, "locale" TEXT NOT NULL, "name" TEXT NOT NULL, "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" TIMESTAMP(3) NOT NULL, CONSTRAINT "tag_translations_pkey" PRIMARY KEY ("uuid"));
+CREATE UNIQUE INDEX "tags_tenant_uuid_slug_key" ON "tags"("tenant_uuid", "slug");
+CREATE INDEX "tags_tenant_uuid_idx" ON "tags"("tenant_uuid"); CREATE INDEX "tags_slug_idx" ON "tags"("slug");
+CREATE UNIQUE INDEX "tag_translations_tag_uuid_locale_key" ON "tag_translations"("tag_uuid", "locale"); CREATE INDEX "tag_translations_tag_uuid_idx" ON "tag_translations"("tag_uuid"); CREATE INDEX "tag_translations_locale_idx" ON "tag_translations"("locale");
+ALTER TABLE "tags" ADD CONSTRAINT "tags_tenant_uuid_fkey" FOREIGN KEY ("tenant_uuid") REFERENCES "tenants"("uuid") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "tag_translations" ADD CONSTRAINT "tag_translations_tag_uuid_fkey" FOREIGN KEY ("tag_uuid") REFERENCES "tags"("uuid") ON DELETE CASCADE ON UPDATE CASCADE;
+INSERT INTO "role_permissions" ("uuid", "role_uuid", "permission") SELECT gen_random_uuid(), "uuid", permission FROM "roles" CROSS JOIN (VALUES ('TAG_VIEW'), ('TAG_CREATE'), ('TAG_EDIT'), ('TAG_DELETE')) AS defaults(permission) WHERE "code" IN ('SUPERADMIN','ADMIN') ON CONFLICT ("role_uuid", "permission") DO NOTHING;
+INSERT INTO "role_permissions" ("uuid", "role_uuid", "permission") SELECT gen_random_uuid(), "uuid", 'TAG_VIEW' FROM "roles" WHERE "code" = 'EDITOR' ON CONFLICT ("role_uuid", "permission") DO NOTHING;
+DELETE FROM "role_permissions" WHERE "role_uuid" IN (SELECT "uuid" FROM "roles" WHERE "code"='EDITOR') AND "permission" IN ('TAG_CREATE','TAG_EDIT','TAG_DELETE');

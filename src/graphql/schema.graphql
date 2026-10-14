@@ -69,16 +69,24 @@ enum TenantUserPermission {
   CATEGORY_EDIT_SUBCATEGORY
   CATEGORY_DELETE
   CATEGORY_DELETE_SUBCATEGORY
+  TAG_VIEW
+  TAG_CREATE
+  TAG_EDIT
+  TAG_DELETE
 }
 
 input TranslationInput { locale: String!, name: String! }
-input CreateCategoryInput { slug: String!, translations: [TranslationInput!]! }
+input CreateCategoryInput { slug: String!, translations: [TranslationInput!] }
 input UpdateCategoryInput { slug: String, translations: [TranslationInput!] }
-input CreateSubcategoryInput { categoryId: ID!, slug: String!, translations: [TranslationInput!]! }
+input CreateSubcategoryInput { categoryId: ID!, slug: String!, translations: [TranslationInput!] }
 input UpdateSubcategoryInput { slug: String, translations: [TranslationInput!] }
 
 type CategoryTranslation { locale: String!, name: String! }
 type SubcategoryTranslation { locale: String!, name: String! }
+type TagTranslation { locale: String!, name: String! }
+type Tag { id: ID!, name: String!, slug: String!, translations: [TagTranslation!]!, createdAt: String!, updatedAt: String! }
+input CreateTagInput { name: String!, slug: String!, translations: [TranslationInput!] }
+input UpdateTagInput { name: String, slug: String, translations: [TranslationInput!] }
 type Category { id: ID!, slug: String!, name: String!, translations: [CategoryTranslation!]!, subcategories: [Subcategory!]!, createdAt: String!, updatedAt: String! }
 type Subcategory { id: ID!, categoryId: ID!, slug: String!, translations: [SubcategoryTranslation!]!, createdAt: String!, updatedAt: String! }
 
@@ -443,6 +451,8 @@ type Query {
   category(id: ID!): Category
   subcategories(categoryId: ID, search: String): [Subcategory!]!
   subcategory(id: ID!): Subcategory
+  tags(search: String, page: Int = 1, pageSize: Int = 25): [Tag!]!
+  tag(id: ID!): Tag
   subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
   subTenant(id: ID!): Tenant!
   tenantByHostname(
@@ -536,4 +546,7 @@ type Mutation {
   createSubcategory(input: CreateSubcategoryInput!): Subcategory!
   updateSubcategory(id: ID!, input: UpdateSubcategoryInput!): Subcategory!
   deleteSubcategory(id: ID!): Boolean!
+  createTag(input: CreateTagInput!): Tag!
+  updateTag(id: ID!, input: UpdateTagInput!): Tag!
+  deleteTag(id: ID!): Boolean!
 }

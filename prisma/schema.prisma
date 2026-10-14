@@ -72,6 +72,8 @@ model Tenant {
   auditLogs        AuditLog[]
   categories       Category[]
   subcategories    Subcategory[]
+  tags             Tag[]
+  articles         Article[]
   createdAt        DateTime             @default(now()) @map("created_at")
   updatedAt        DateTime             @updatedAt @map("updated_at")
   deletedAt        DateTime?            @map("deleted_at")
@@ -394,4 +396,62 @@ model AuditLog {
   @@index([tenantUuid])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model Tag {
+  uuid         String           @id @default(uuid()) @map("uuid")
+  tenantUuid   String           @map("tenant_uuid")
+  tenant       Tenant           @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  name         String
+  slug         String
+  translations TagTranslation[]
+  articles     ArticleTag[]
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  @@unique([tenantUuid, slug])
+  @@unique([uuid, tenantUuid])
+  @@index([tenantUuid])
+  @@index([slug])
+  @@map("tags")
+}
+
+model TagTranslation {
+  uuid      String   @id @default(uuid()) @map("uuid")
+  tagUuid   String   @map("tag_uuid")
+  tag       Tag      @relation(fields: [tagUuid], references: [uuid], onDelete: Cascade)
+  locale    String
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tagUuid, locale])
+  @@index([tagUuid])
+  @@index([locale])
+  @@map("tag_translations")
+}
+model Article {
+  uuid       String       @id @default(uuid()) @map("uuid")
+  tenantUuid String       @map("tenant_uuid")
+  tenant     Tenant       @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  title      String
+  tags       ArticleTag[]
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  @@unique([uuid, tenantUuid])
+  @@index([tenantUuid])
+  @@map("articles")
+}
+
+model ArticleTag {
+  articleUuid String  @map("article_uuid")
+  tagUuid     String  @map("tag_uuid")
+  tenantUuid  String  @map("tenant_uuid")
+  article     Article @relation(fields: [articleUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
+  tag         Tag     @relation(fields: [tagUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
+
+  @@id([articleUuid, tagUuid])
+  @@index([tagUuid, tenantUuid])
+  @@map("article_tags")
 }

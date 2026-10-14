@@ -18,12 +18,14 @@ export const tenantUserPermissionCodes = [
   "BRANDING_UPDATE",
   "CATEGORY_VIEW",
   "CATEGORY_VIEW_SUBCATEGORY",
+  "TAG_VIEW",
   "CATEGORY_CREATE",
   "CATEGORY_CREATE_SUBCATEGORY",
   "CATEGORY_EDIT",
   "CATEGORY_EDIT_SUBCATEGORY",
   "CATEGORY_DELETE",
   "CATEGORY_DELETE_SUBCATEGORY",
+  "TAG_CREATE", "TAG_EDIT", "TAG_DELETE",
 ] as const;
 
 export type TenantUserPermission = (typeof tenantUserPermissionCodes)[number];
@@ -35,6 +37,7 @@ export const allowedEditorUserPermissions = [
   "BRANDING_VIEW",
   "CATEGORY_VIEW",
   "CATEGORY_VIEW_SUBCATEGORY",
+  "TAG_VIEW",
 ] as const satisfies readonly TenantUserPermission[];
 
 const updateRolePermissionsSchema = z.object({
@@ -53,6 +56,9 @@ const updateRolePermissionsSchema = z.object({
       path: ["permissions"],
       message: "View users is required for every other user-management permission",
     });
+  }
+  if (value.permissions.some(permission => permission.startsWith("TAG_") && permission !== "TAG_VIEW") && !value.permissions.includes("TAG_VIEW")) {
+    ctx.addIssue({ code: "custom", path: ["permissions"], message: "View tags is required for tag management permissions" });
   }
   const hasCategoryAction = value.permissions.some(
     (permission) => permission.startsWith("CATEGORY_") && permission !== "CATEGORY_VIEW" && permission !== "CATEGORY_VIEW_SUBCATEGORY",
