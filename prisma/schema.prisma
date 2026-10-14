@@ -91,10 +91,12 @@ model Category {
   name         String
   translations CategoryTranslation[]
   subcategories Subcategory[]
+  articles     Article[]
   createdAt    DateTime              @default(now()) @map("created_at")
   updatedAt    DateTime              @updatedAt @map("updated_at")
 
   @@unique([tenantUuid, slug])
+  @@unique([uuid, tenantUuid])
   @@index([tenantUuid])
   @@map("categories")
 }
@@ -121,10 +123,12 @@ model Subcategory {
   category     Category                 @relation(fields: [categoryUuid], references: [uuid], onDelete: Cascade)
   slug         String
   translations SubcategoryTranslation[]
+  articles     Article[]
   createdAt    DateTime                 @default(now()) @map("created_at")
   updatedAt    DateTime                 @updatedAt @map("updated_at")
 
   @@unique([tenantUuid, categoryUuid, slug])
+  @@unique([uuid, tenantUuid, categoryUuid])
   @@index([tenantUuid, categoryUuid])
   @@map("subcategories")
 }
@@ -243,6 +247,10 @@ model User {
   createdActivationTokens UserActivationToken[]    @relation("ActivationCreatedBy")
   createdResetTokens      UserPasswordResetToken[] @relation("ResetCreatedBy")
   createdMemberships      TenantMembership[]       @relation("MembershipCreatedBy")
+  authoredArticles         Article[]                @relation("ArticleAuthor")
+  publishedArticles        Article[]                @relation("ArticlePublisher")
+  scheduledArticles        Article[]                @relation("ArticleScheduler")
+  articleReviews           ArticleReview[]
 
   @@index([status])
   @@map("users")
@@ -430,18 +438,88 @@ model TagTranslation {
   @@index([locale])
   @@map("tag_translations")
 }
+enum ArticleStatus {
+  DRAFT
+  IN_REVIEW
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ArticleReviewDecision {
+  SUBMITTED
+  CHANGES_REQUESTED
+  APPROVED
+}
+
 model Article {
-  uuid       String       @id @default(uuid()) @map("uuid")
-  tenantUuid String       @map("tenant_uuid")
-  tenant     Tenant       @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
-  title      String
-  tags       ArticleTag[]
-  createdAt  DateTime     @default(now()) @map("created_at")
-  updatedAt  DateTime     @updatedAt @map("updated_at")
+  uuid             String               @id @default(uuid()) @map("uuid")
+  tenantUuid       String               @map("tenant_uuid")
+  tenant           Tenant               @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  createdByUuid    String?              @map("created_by_uuid")
+  createdBy        User?                @relation("ArticleAuthor", fields: [createdByUuid], references: [uuid], onDelete: SetNull)
+  publishedByUuid  String?              @map("published_by_uuid")
+  publishedBy      User?                @relation("ArticlePublisher", fields: [publishedByUuid], references: [uuid], onDelete: SetNull)
+  scheduledByUuid  String?              @map("scheduled_by_uuid")
+  scheduledBy      User?                @relation("ArticleScheduler", fields: [scheduledByUuid], references: [uuid], onDelete: SetNull)
+  title            String
+  slug             String
+  summary          String?
+  content          String               @default("")
+  categoryUuid     String               @map("category_uuid")
+  category         Category             @relation(fields: [categoryUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Restrict)
+  subcategoryUuid  String               @map("subcategory_uuid")
+  subcategory      Subcategory          @relation(fields: [subcategoryUuid, tenantUuid, categoryUuid], references: [uuid, tenantUuid, categoryUuid], onDelete: Restrict)
+  status           ArticleStatus        @default(DRAFT)
+  isBreaking       Boolean              @default(false) @map("is_breaking")
+  isFeatured       Boolean              @default(false) @map("is_featured")
+  featuredImageUrl String?              @map("featured_image_url")
+  scheduledAt      DateTime?            @map("scheduled_at")
+  publishedAt      DateTime?            @map("published_at")
+  archivedAt       DateTime?            @map("archived_at")
+  tags             ArticleTag[]
+  translations     ArticleTranslation[]
+  reviews          ArticleReview[]
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
 
   @@unique([uuid, tenantUuid])
-  @@index([tenantUuid])
+  @@unique([tenantUuid, slug])
+  @@index([tenantUuid, status, updatedAt])
+  @@index([status, scheduledAt])
+  @@index([tenantUuid, createdByUuid])
   @@map("articles")
+}
+
+model ArticleTranslation {
+  uuid        String   @id @default(uuid()) @map("uuid")
+  articleUuid String   @map("article_uuid")
+  article     Article  @relation(fields: [articleUuid], references: [uuid], onDelete: Cascade)
+  locale      String
+  title       String
+  summary     String?
+  content     String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([articleUuid, locale])
+  @@index([locale])
+  @@map("article_translations")
+}
+
+model ArticleReview {
+  uuid         String                @id @default(uuid()) @map("uuid")
+  tenantUuid   String                @map("tenant_uuid")
+  articleUuid  String                @map("article_uuid")
+  article      Article               @relation(fields: [articleUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
+  reviewerUuid String?               @map("reviewer_uuid")
+  reviewer     User?                 @relation(fields: [reviewerUuid], references: [uuid], onDelete: SetNull)
+  decision     ArticleReviewDecision
+  comment      String?
+  createdAt    DateTime              @default(now()) @map("created_at")
+
+  @@index([tenantUuid, articleUuid, createdAt])
+  @@map("article_reviews")
 }
 
 model ArticleTag {

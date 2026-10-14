@@ -11,11 +11,15 @@ databaseDescribe("Tags relational database guarantees", () => {
   let tagA: string;
   let tagB: string;
   let articleA: string;
+  let categoryA: string;
+  let subcategoryA: string;
   beforeAll(async () => {
     await db.tenant.createMany({ data: [tenantA, tenantB].map(uuid => ({ uuid, name: "Tags integration test", slug: `tags-test-${uuid}`, type: "SUB" })) });
     tagA = (await db.tag.create({ data: { tenantUuid: tenantA, name: "Artificial Intelligence", slug: "ai" } })).uuid;
     tagB = (await db.tag.create({ data: { tenantUuid: tenantB, name: "AI", slug: "ai" } })).uuid;
-    articleA = (await db.article.create({ data: { tenantUuid: tenantA, title: "Tags test article" } })).uuid;
+    categoryA = (await db.category.create({ data: { tenantUuid: tenantA, name: "Technology", slug: "technology" } })).uuid;
+    subcategoryA = (await db.subcategory.create({ data: { tenantUuid: tenantA, categoryUuid: categoryA, slug: "ai" } })).uuid;
+    articleA = (await db.article.create({ data: { tenantUuid: tenantA, title: "Tags test article", slug: "tags-test", categoryUuid: categoryA, subcategoryUuid: subcategoryA } })).uuid;
   });
   afterAll(async () => {
     await db.tenant.deleteMany({ where: { uuid: { in: [tenantA, tenantB] } } });
@@ -41,7 +45,7 @@ databaseDescribe("Tags relational database guarantees", () => {
   });
   it("supports many tags per article and many articles per tag", async () => {
     const otherTag = await db.tag.create({ data: { tenantUuid: tenantA, name: "Technology", slug: "technology" } });
-    const otherArticle = await db.article.create({ data: { tenantUuid: tenantA, title: "Another article" } });
+    const otherArticle = await db.article.create({ data: { tenantUuid: tenantA, title: "Another article", slug: "another-article", categoryUuid: categoryA, subcategoryUuid: subcategoryA } });
     await db.articleTag.createMany({ data: [{ articleUuid: articleA, tagUuid: tagA, tenantUuid: tenantA }, { articleUuid: articleA, tagUuid: otherTag.uuid, tenantUuid: tenantA }, { articleUuid: otherArticle.uuid, tagUuid: tagA, tenantUuid: tenantA }] });
     expect(await db.articleTag.count({ where: { articleUuid: articleA } })).toBe(2);
     expect(await db.articleTag.count({ where: { tagUuid: tagA } })).toBe(2);

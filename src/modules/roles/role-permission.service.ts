@@ -26,7 +26,15 @@ export const tenantUserPermissionCodes = [
   "CATEGORY_DELETE",
   "CATEGORY_DELETE_SUBCATEGORY",
   "TAG_CREATE", "TAG_EDIT", "TAG_DELETE",
+  "ARTICLE_VIEW", "ARTICLE_CREATE", "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY",
+  "ARTICLE_DELETE_OWN", "ARTICLE_DELETE_ANY", "ARTICLE_SUBMIT", "ARTICLE_REVIEW",
+  "ARTICLE_PUBLISH", "ARTICLE_SCHEDULE", "ARTICLE_ARCHIVE", "ARTICLE_RESTORE",
+  "ARTICLE_SET_BREAKING", "ARTICLE_SET_FEATURED",
 ] as const;
+
+export const articlePermissionCodes = tenantUserPermissionCodes.filter(
+  (permission) => permission.startsWith("ARTICLE_"),
+);
 
 export type TenantUserPermission = (typeof tenantUserPermissionCodes)[number];
 
@@ -38,6 +46,7 @@ export const allowedEditorUserPermissions = [
   "CATEGORY_VIEW",
   "CATEGORY_VIEW_SUBCATEGORY",
   "TAG_VIEW",
+  ...articlePermissionCodes,
 ] as const satisfies readonly TenantUserPermission[];
 
 const updateRolePermissionsSchema = z.object({
@@ -59,6 +68,9 @@ const updateRolePermissionsSchema = z.object({
   }
   if (value.permissions.some(permission => permission.startsWith("TAG_") && permission !== "TAG_VIEW") && !value.permissions.includes("TAG_VIEW")) {
     ctx.addIssue({ code: "custom", path: ["permissions"], message: "View tags is required for tag management permissions" });
+  }
+  if (value.permissions.some(permission => permission.startsWith("ARTICLE_") && permission !== "ARTICLE_VIEW") && !value.permissions.includes("ARTICLE_VIEW")) {
+    ctx.addIssue({ code: "custom", path: ["permissions"], message: "View articles is required for article management permissions" });
   }
   const hasCategoryAction = value.permissions.some(
     (permission) => permission.startsWith("CATEGORY_") && permission !== "CATEGORY_VIEW" && permission !== "CATEGORY_VIEW_SUBCATEGORY",
@@ -131,7 +143,7 @@ export async function updateTenantRolePermissions(session: SessionPayload, input
         ),
     )
   ) {
-    throw validationError("Editor can only be granted view permissions for users, categories, and settings.");
+    throw validationError("Editor cannot be granted this user or settings permission.");
   }
 
   const role = await prisma.role.findUnique({

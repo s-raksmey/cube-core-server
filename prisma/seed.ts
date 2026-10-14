@@ -37,6 +37,17 @@ const DEFAULT_ADMIN_CATEGORY_PERMISSIONS = [
   "TAG_VIEW", "TAG_CREATE", "TAG_EDIT", "TAG_DELETE",
 ] as const;
 
+const DEFAULT_ADMIN_ARTICLE_PERMISSIONS = [
+  "ARTICLE_VIEW", "ARTICLE_CREATE", "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY",
+  "ARTICLE_DELETE_OWN", "ARTICLE_DELETE_ANY", "ARTICLE_SUBMIT", "ARTICLE_REVIEW",
+  "ARTICLE_PUBLISH", "ARTICLE_SCHEDULE", "ARTICLE_ARCHIVE", "ARTICLE_RESTORE",
+  "ARTICLE_SET_BREAKING", "ARTICLE_SET_FEATURED",
+] as const;
+
+const DEFAULT_EDITOR_ARTICLE_PERMISSIONS = [
+  "ARTICLE_VIEW", "ARTICLE_CREATE", "ARTICLE_UPDATE_OWN", "ARTICLE_DELETE_OWN", "ARTICLE_SUBMIT",
+] as const;
+
 const DEFAULT_EDITOR_CATEGORY_PERMISSIONS = ["CATEGORY_VIEW", "CATEGORY_VIEW_SUBCATEGORY", "TAG_VIEW"] as const;
 
 async function ensureRoles() {
@@ -72,7 +83,7 @@ async function ensureRoles() {
   for (const roleUuid of [ROLE_IDS.SUPERADMIN, ROLE_IDS.ADMIN]) {
     const count = await prisma.rolePermission.count({ where: { roleUuid } });
     if (count === 0) await prisma.rolePermission.createMany({
-      data: DEFAULT_ADMIN_USER_PERMISSIONS.map((permission) => ({ roleUuid, permission })),
+      data: [...DEFAULT_ADMIN_USER_PERMISSIONS, ...DEFAULT_ADMIN_ARTICLE_PERMISSIONS].map((permission) => ({ roleUuid, permission })),
     });
     await prisma.rolePermission.createMany({
       data: DEFAULT_ADMIN_CATEGORY_PERMISSIONS.map((permission) => ({ roleUuid, permission })),
@@ -85,7 +96,7 @@ async function ensureRoles() {
   });
   if (editorPermissionCount === 0) {
     await prisma.rolePermission.createMany({
-      data: DEFAULT_EDITOR_USER_PERMISSIONS.map((permission) => ({
+      data: [...DEFAULT_EDITOR_USER_PERMISSIONS, ...DEFAULT_EDITOR_ARTICLE_PERMISSIONS].map((permission) => ({
         roleUuid: ROLE_IDS.EDITOR,
         permission,
       })),

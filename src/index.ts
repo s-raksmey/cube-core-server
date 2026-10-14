@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { createYoga } from "graphql-yoga";
 import { schema } from "@/src/graphql/resolvers";
 import { createContext, type GraphQLContext } from "@/src/graphql/context";
+import { startArticleScheduler } from "@/src/modules/articles/article-scheduler";
 
 const port = Number(process.env.PORT ?? 4000);
 
@@ -45,4 +46,5 @@ const server = createServer(async (req, res) => {
 
 server.listen(port, () => {
   console.log(`Cube Core GraphQL ready at http://localhost:${port}/graphql`);
+  startArticleScheduler();
 });

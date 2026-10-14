@@ -73,6 +73,9 @@ export async function updateTenantUser(session: SessionPayload, userId: string, 
     if (!account) throw validationError("User not found");
     return { ...mapAuthUser(account), createdAt: null, lastLoginAt: null, totpEnabled: Boolean(account.totpEnabledAt) };
   }
+  if (session.role === "EDITOR") {
+    throw forbidden("Editors can only update their own profile");
+  }
   const updatePermission: TenantUserPermission = parsed.data.role
     ? "USERS_CHANGE_ROLE"
     : parsed.data.suspended !== undefined || parsed.data.status === "INACTIVE"

@@ -73,6 +73,20 @@ enum TenantUserPermission {
   TAG_CREATE
   TAG_EDIT
   TAG_DELETE
+  ARTICLE_VIEW
+  ARTICLE_CREATE
+  ARTICLE_UPDATE_OWN
+  ARTICLE_UPDATE_ANY
+  ARTICLE_DELETE_OWN
+  ARTICLE_DELETE_ANY
+  ARTICLE_SUBMIT
+  ARTICLE_REVIEW
+  ARTICLE_PUBLISH
+  ARTICLE_SCHEDULE
+  ARTICLE_ARCHIVE
+  ARTICLE_RESTORE
+  ARTICLE_SET_BREAKING
+  ARTICLE_SET_FEATURED
 }
 
 input TranslationInput { locale: String!, name: String! }
@@ -89,6 +103,66 @@ input CreateTagInput { name: String!, slug: String!, translations: [TranslationI
 input UpdateTagInput { name: String, slug: String, translations: [TranslationInput!] }
 type Category { id: ID!, slug: String!, name: String!, translations: [CategoryTranslation!]!, subcategories: [Subcategory!]!, createdAt: String!, updatedAt: String! }
 type Subcategory { id: ID!, categoryId: ID!, slug: String!, translations: [SubcategoryTranslation!]!, createdAt: String!, updatedAt: String! }
+
+enum ArticleStatus { DRAFT IN_REVIEW SCHEDULED PUBLISHED ARCHIVED }
+enum ArticleScope { ALL MY REVIEW }
+enum ArticleReviewDecision { SUBMITTED CHANGES_REQUESTED APPROVED }
+type ArticleSummary {
+  id: ID!
+  title: String!
+  slug: String!
+  status: ArticleStatus!
+  categoryId: ID!
+  categoryName: String!
+  authorId: ID
+  authorName: String
+  isBreaking: Boolean!
+  isFeatured: Boolean!
+  featuredImageUrl: String
+  scheduledAt: String
+  updatedAt: String!
+}
+type ArticlePage { items: [ArticleSummary!]!, total: Int!, page: Int!, pageSize: Int! }
+type ArticleTag { id: ID!, name: String! }
+type ArticleTranslation { locale: String!, title: String!, summary: String, content: String! }
+type ArticleReview { id: ID!, decision: ArticleReviewDecision!, comment: String, reviewerName: String, createdAt: String! }
+type Article {
+  id: ID!
+  title: String!
+  slug: String!
+  summary: String
+  content: String!
+  status: ArticleStatus!
+  categoryId: ID!
+  categoryName: String!
+  subcategoryId: ID!
+  subcategoryName: String!
+  authorId: ID
+  authorName: String
+  publishedById: ID
+  isBreaking: Boolean!
+  isFeatured: Boolean!
+  featuredImageUrl: String
+  scheduledAt: String
+  publishedAt: String
+  archivedAt: String
+  createdAt: String!
+  updatedAt: String!
+  tags: [ArticleTag!]!
+  translations: [ArticleTranslation!]!
+  reviews: [ArticleReview!]!
+}
+input ArticleTranslationInput { locale: String!, title: String!, summary: String, content: String! }
+input CreateArticleInput {
+  title: String!, slug: String!, summary: String, content: String!,
+  categoryId: ID!, subcategoryId: ID!, tagIds: [ID!],
+  translations: [ArticleTranslationInput!], featuredImageUrl: String
+}
+input UpdateArticleInput {
+  title: String, slug: String, summary: String, content: String,
+  categoryId: ID, subcategoryId: ID, tagIds: [ID!],
+  translations: [ArticleTranslationInput!], featuredImageUrl: String
+}
 
 enum BrandingAsset {
   MANAGEMENT_LOGO
@@ -453,6 +527,8 @@ type Query {
   subcategory(id: ID!): Subcategory
   tags(search: String, page: Int = 1, pageSize: Int = 25): [Tag!]!
   tag(id: ID!): Tag
+  articles(search: String, status: ArticleStatus, categoryId: ID, scope: ArticleScope, page: Int, pageSize: Int): ArticlePage!
+  article(id: ID!): Article
   subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
   subTenant(id: ID!): Tenant!
   tenantByHostname(
@@ -549,4 +625,17 @@ type Mutation {
   createTag(input: CreateTagInput!): Tag!
   updateTag(id: ID!, input: UpdateTagInput!): Tag!
   deleteTag(id: ID!): Boolean!
+  createArticle(input: CreateArticleInput!): Article!
+  updateArticle(id: ID!, input: UpdateArticleInput!): Article!
+  deleteArticle(id: ID!): Boolean!
+  submitArticleForReview(id: ID!): Article!
+  requestArticleChanges(id: ID!, comment: String!): Article!
+  publishArticle(id: ID!): Article!
+  scheduleArticle(id: ID!, scheduledAt: String!): Article!
+  updateArticleSchedule(id: ID!, scheduledAt: String!): Article!
+  cancelArticleSchedule(id: ID!): Article!
+  archiveArticle(id: ID!): Article!
+  restoreArticle(id: ID!): Article!
+  setArticleBreaking(id: ID!, enabled: Boolean!): Article!
+  setArticleFeatured(id: ID!, enabled: Boolean!): Article!
 }
