@@ -82,6 +82,7 @@ enum TenantUserPermission {
   ARTICLE_DELETE_ARCHIVED
   ARTICLE_SUBMIT
   ARTICLE_REVIEW
+  ARTICLE_REQUEST_CHANGES
   ARTICLE_PUBLISH
   ARTICLE_UNPUBLISH
   ARTICLE_SCHEDULE
@@ -118,6 +119,7 @@ type ArticleSummary {
   categoryName: String!
   authorId: ID
   authorName: String
+  authorRole: SubTenantRole
   isBreaking: Boolean!
   isFeatured: Boolean!
   featuredImageUrl: String
@@ -176,6 +178,7 @@ type Article {
   subcategoryName: String!
   authorId: ID
   authorName: String
+  authorRole: SubTenantRole
   publishedById: ID
   isBreaking: Boolean!
   isFeatured: Boolean!
@@ -193,12 +196,14 @@ input ArticleTranslationInput { locale: String!, title: String!, summary: String
 input CreateArticleInput {
   title: String!, slug: String!, summary: String, content: String!,
   categoryId: ID!, subcategoryId: ID!, tagIds: [ID!],
-  translations: [ArticleTranslationInput!], featuredImageUrl: String
+  translations: [ArticleTranslationInput!], featuredImageUrl: String,
+  isBreaking: Boolean, isFeatured: Boolean
 }
 input UpdateArticleInput {
   title: String, slug: String, summary: String, content: String,
   categoryId: ID, subcategoryId: ID, tagIds: [ID!],
-  translations: [ArticleTranslationInput!], featuredImageUrl: String
+  translations: [ArticleTranslationInput!], featuredImageUrl: String,
+  isBreaking: Boolean, isFeatured: Boolean
 }
 
 enum BrandingAsset {

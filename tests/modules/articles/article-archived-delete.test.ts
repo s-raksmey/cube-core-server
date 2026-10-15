@@ -9,6 +9,7 @@ vi.mock("@/src/lib/db", () => ({ prisma: {
   $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({ article: { delete: mocks.remove } }),
 } }));
 vi.mock("@/src/modules/roles/role-permission.service", () => ({ getTenantUserPermissions: mocks.permissions }));
+vi.mock("@/src/modules/articles/article-role-access", () => ({ assertCanManageArticleAuthor: vi.fn(), articleAuthorRoles: vi.fn().mockResolvedValue(new Map()) }));
 vi.mock("@/src/modules/auth/audit-auth", () => ({ writeAuthAudit: mocks.audit }));
 
 import { deleteArchivedArticle } from "@/src/modules/articles/article.service";

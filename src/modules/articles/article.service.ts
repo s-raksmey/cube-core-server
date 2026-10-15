@@ -6,6 +6,7 @@ import { forbidden, notFound, validationError } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import { getTenantUserPermissions, type TenantUserPermission } from "@/src/modules/roles/role-permission.service";
 import { assertArticleTransition, canEditArticleStatus, type ArticleAction } from "./article-policy";
+import { articleAuthorRoles, assertCanManageArticleAuthor } from "./article-role-access";
 import { commentSchema, createArticleSchema, scheduleAtSchema, updateArticleSchema } from "./article-validation";
 
 type PermissionSet = Set<TenantUserPermission>;
@@ -49,15 +50,15 @@ const detailSelect = {
 type ListRow = Prisma.ArticleGetPayload<{ select: typeof listSelect }>;
 type DetailRow = Prisma.ArticleGetPayload<{ select: typeof detailSelect }>;
 const nameOf = (person: { firstName: string; lastName: string } | null) => person ? `${person.firstName} ${person.lastName}`.trim() : null;
-function mapList(row: ListRow) {
+function mapList(row: ListRow, authorRole: "ADMIN" | "EDITOR" | null) {
   return { id: row.uuid, title: row.title, slug: row.slug, status: row.status,
     categoryId: row.categoryUuid, categoryName: row.category.name, authorId: row.createdByUuid,
-    authorName: nameOf(row.createdBy), isBreaking: row.isBreaking, isFeatured: row.isFeatured,
+    authorName: nameOf(row.createdBy), authorRole, isBreaking: row.isBreaking, isFeatured: row.isFeatured,
     featuredImageUrl: row.featuredImageUrl, scheduledAt: row.scheduledAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString() };
 }
-function mapDetail(row: DetailRow) {
-  return { ...mapList(row), summary: row.summary, content: row.content,
+function mapDetail(row: DetailRow, authorRole: "ADMIN" | "EDITOR" | null) {
+  return { ...mapList(row, authorRole), summary: row.summary, content: row.content,
     subcategoryId: row.subcategoryUuid, subcategoryName: row.subcategory.translations[0]?.name ?? "",
     publishedAt: row.publishedAt?.toISOString() ?? null, archivedAt: row.archivedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(), publishedById: row.publishedByUuid,
@@ -70,6 +71,7 @@ async function rowForAction(id: string, tenantUuid: string) {
   const uuid = parse(z.string().uuid(), id);
   const row = await prisma.article.findFirst({ where: { uuid, tenantUuid },
     select: { uuid: true, status: true, createdByUuid: true, title: true, content: true,
+      isBreaking: true, isFeatured: true,
       categoryUuid: true, subcategoryUuid: true, slug: true, scheduledAt: true,
       translations: { select: { locale: true, title: true, content: true } } } });
   if (!row) throw notFound("Article not found");
@@ -125,20 +127,26 @@ export async function listArticles(session: SessionPayload, input: unknown) {
       skip: (filter.page - 1) * filter.pageSize, take: filter.pageSize }),
     prisma.article.count({ where }),
   ]);
-  return { items: rows.map(mapList), total, page: filter.page, pageSize: filter.pageSize };
+  const roles = await articleAuthorRoles(tenantUuid, rows.map((row) => row.createdByUuid));
+  return { items: rows.map((row) => mapList(row, roles.get(row.createdByUuid ?? "") ?? null)), total, page: filter.page, pageSize: filter.pageSize };
 }
 
 export async function getArticle(session: SessionPayload, id: string) {
   const { tenantUuid, permissions } = await access(session);
   requirePermission(permissions, "ARTICLE_VIEW");
   const row = await prisma.article.findFirst({ where: { uuid: parse(z.string().uuid(), id), tenantUuid }, select: detailSelect });
-  return row ? mapDetail(row) : null;
+  if (!row) return null;
+  const roles = await articleAuthorRoles(tenantUuid, [row.createdByUuid]);
+  return mapDetail(row, roles.get(row.createdByUuid ?? "") ?? null);
 }
 
 export async function createArticle(session: SessionPayload, input: unknown) {
   const { tenantUuid, permissions } = await access(session);
+  requirePermission(permissions, "ARTICLE_VIEW");
   requirePermission(permissions, "ARTICLE_CREATE");
   const data = parse(createArticleSchema, input);
+  if (data.isBreaking) requirePermission(permissions, "ARTICLE_SET_BREAKING");
+  if (data.isFeatured) requirePermission(permissions, "ARTICLE_SET_FEATURED");
   await validateRelations(tenantUuid, permissions, data.categoryId, data.subcategoryId, data.tagIds);
   try {
     const article = await prisma.$transaction(async (tx) => {
@@ -149,13 +157,20 @@ export async function createArticle(session: SessionPayload, input: unknown) {
         subcategory: { connect: { uuid_tenantUuid_categoryUuid: { uuid: data.subcategoryId, tenantUuid, categoryUuid: data.categoryId } } },
         title: data.title, slug: data.slug, summary: data.summary ?? null,
         content: data.content, featuredImageUrl: data.featuredImageUrl ?? null,
+        isBreaking: data.isBreaking ?? false, isFeatured: data.isFeatured ?? false,
         translations: { create: data.translations.map((item) => ({ ...item, summary: item.summary ?? null })) },
       }, select: { uuid: true } });
       if (data.tagIds.length) await tx.articleTag.createMany({ data: data.tagIds.map((tagUuid) => ({
         articleUuid: created.uuid, tagUuid, tenantUuid,
       })) });
       await writeAuthAudit({ action: "ARTICLE_CREATED", actorUserUuid: session.userId, tenantUuid,
-        targetType: "article", targetUuid: created.uuid, metadata: { title: data.title, status: "DRAFT" } }, tx);
+        targetType: "article", targetUuid: created.uuid,
+        metadata: { title: data.title, status: "DRAFT", isBreaking: data.isBreaking ?? false, isFeatured: data.isFeatured ?? false } }, tx);
+      for (const [kind, enabled] of [["BREAKING", data.isBreaking], ["FEATURED", data.isFeatured]] as const) {
+        if (enabled) await writeAuthAudit({ action: `ARTICLE_${kind}_ENABLED`, actorUserUuid: session.userId,
+          tenantUuid, targetType: "article", targetUuid: created.uuid,
+          metadata: { title: data.title, status: "DRAFT" } }, tx);
+      }
       return created;
     });
     return getArticle(session, article.uuid);
@@ -164,12 +179,16 @@ export async function createArticle(session: SessionPayload, input: unknown) {
 
 export async function updateArticle(session: SessionPayload, id: string, input: unknown) {
   const { tenantUuid, permissions } = await access(session);
+  requirePermission(permissions, "ARTICLE_VIEW");
   const row = await rowForAction(id, tenantUuid);
   assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
+  await assertCanManageArticleAuthor(session, row.createdByUuid);
   if (!canEditArticleStatus(row.status)) throw validationError(row.status === ArticleStatus.PUBLISHED
     ? "Published articles must be unpublished before editing"
     : "Article is locked for editing in its current status");
   const data = parse(updateArticleSchema, input);
+  if (data.isBreaking !== undefined) requirePermission(permissions, "ARTICLE_SET_BREAKING");
+  if (data.isFeatured !== undefined) requirePermission(permissions, "ARTICLE_SET_FEATURED");
   if (data.categoryId || data.subcategoryId || data.tagIds) {
     await validateRelations(tenantUuid, permissions, data.categoryId ?? row.categoryUuid, data.subcategoryId ?? row.subcategoryUuid, data.tagIds ?? []);
   }
@@ -182,6 +201,7 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
           uuid: data.subcategoryId ?? row.subcategoryUuid, tenantUuid, categoryUuid: data.categoryId ?? row.categoryUuid,
         } } } } : {}),
         featuredImageUrl: data.featuredImageUrl,
+        isBreaking: data.isBreaking, isFeatured: data.isFeatured,
         ...(data.translations ? { translations: { deleteMany: {}, create: data.translations.map((item) => ({ ...item, summary: item.summary ?? null })) } } : {}),
       }, select: { uuid: true } });
       if (data.tagIds) {
@@ -189,6 +209,12 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
         if (data.tagIds.length) await tx.articleTag.createMany({ data: data.tagIds.map((tagUuid) => ({
           articleUuid: row.uuid, tagUuid, tenantUuid,
         })) });
+      }
+      for (const [kind, before, after] of [["BREAKING", row.isBreaking, data.isBreaking], ["FEATURED", row.isFeatured, data.isFeatured]] as const) {
+        if (after !== undefined && after !== before) await writeAuthAudit({
+          action: `ARTICLE_${kind}_${after ? "ENABLED" : "DISABLED"}`, actorUserUuid: session.userId,
+          tenantUuid, targetType: "article", targetUuid: row.uuid, metadata: { title: row.title, status: row.status },
+        }, tx);
       }
       await writeAuthAudit({ action: "ARTICLE_UPDATED", actorUserUuid: session.userId, tenantUuid,
         targetType: "article", targetUuid: row.uuid, metadata: { changed: Object.keys(data), status: row.status } }, tx);
@@ -199,8 +225,10 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
 
 export async function deleteArticle(session: SessionPayload, id: string) {
   const { tenantUuid, permissions } = await access(session);
+  requirePermission(permissions, "ARTICLE_VIEW");
   const row = await rowForAction(id, tenantUuid);
   assertOwnOrAny(row, session, permissions, "ARTICLE_DELETE_OWN", "ARTICLE_DELETE_ANY");
+  await assertCanManageArticleAuthor(session, row.createdByUuid);
   assertArticleTransition(row.status, "delete");
   try {
     await prisma.$transaction(async (tx) => {
@@ -214,9 +242,11 @@ export async function deleteArticle(session: SessionPayload, id: string) {
 
 export async function deleteArchivedArticle(session: SessionPayload, id: string) {
   const { tenantUuid, permissions } = await access(session);
+  requirePermission(permissions, "ARTICLE_VIEW");
   requirePermission(permissions, "ARTICLE_DELETE_ARCHIVED");
   const row = await rowForAction(id, tenantUuid);
   assertArticleTransition(row.status, "deleteArchived");
+  await assertCanManageArticleAuthor(session, row.createdByUuid);
   try {
     await prisma.$transaction(async (tx) => {
       await tx.article.delete({ where: { uuid: row.uuid, tenantUuid, status: ArticleStatus.ARCHIVED } });
@@ -229,7 +259,7 @@ export async function deleteArchivedArticle(session: SessionPayload, id: string)
 
 type WorkflowAction = Exclude<ArticleAction, "delete" | "deleteArchived">;
 const workflowPermissions: Record<WorkflowAction, TenantUserPermission> = {
-  submit: "ARTICLE_SUBMIT", requestChanges: "ARTICLE_REVIEW", publish: "ARTICLE_PUBLISH",
+  submit: "ARTICLE_SUBMIT", requestChanges: "ARTICLE_REQUEST_CHANGES", publish: "ARTICLE_PUBLISH",
   schedule: "ARTICLE_SCHEDULE", reschedule: "ARTICLE_SCHEDULE", cancelSchedule: "ARTICLE_SCHEDULE", unpublish: "ARTICLE_UNPUBLISH",
   archive: "ARTICLE_ARCHIVE", restore: "ARTICLE_RESTORE",
 };
@@ -246,10 +276,29 @@ const auditActions: Record<WorkflowAction, string> = {
 
 export async function articleWorkflow(session: SessionPayload, id: string, action: WorkflowAction, input?: unknown) {
   const { tenantUuid, permissions } = await access(session);
+  requirePermission(permissions, "ARTICLE_VIEW");
   requirePermission(permissions, workflowPermissions[action]);
   const row = await rowForAction(id, tenantUuid);
+  if (action === "requestChanges" && row.status === ArticleStatus.PUBLISHED) {
+    throw validationError("Unpublish this article before requesting changes");
+  }
   assertArticleTransition(row.status, action);
+  await assertCanManageArticleAuthor(session, row.createdByUuid);
   if (action === "submit") assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
+  if (action === "archive") assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
+  if (action === "requestChanges" && !permissions.has("ARTICLE_REVIEW")) {
+    assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
+  }
+  if (action === "schedule") {
+    if (row.status === ArticleStatus.DRAFT) {
+      assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
+    } else {
+      requirePermission(permissions, "ARTICLE_REVIEW");
+    }
+  }
+  if ((action === "reschedule" || action === "cancelSchedule") && !permissions.has("ARTICLE_REVIEW")) {
+    assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
+  }
   if (["submit", "publish", "schedule"].includes(action)) assertPublicationReady(row);
   const comment = action === "requestChanges" ? parse(commentSchema, input) : null;
   const scheduledAt = action === "schedule" || action === "reschedule"
@@ -278,6 +327,7 @@ export async function articleWorkflow(session: SessionPayload, id: string, actio
       await writeAuthAudit({ action: auditActions[action], actorUserUuid: session.userId, tenantUuid,
         targetType: "article", targetUuid: row.uuid,
         metadata: { title: row.title, previousStatus: row.status, newStatus: nextStatus[action],
+          ...(action === "requestChanges" ? { comment } : {}),
           ...(scheduledAt ? { scheduledAt: scheduledAt.toISOString() } : {}) } }, tx);
     });
     return getArticle(session, row.uuid);
@@ -286,11 +336,20 @@ export async function articleWorkflow(session: SessionPayload, id: string, actio
 
 export async function setArticlePresentation(session: SessionPayload, id: string, kind: "breaking" | "featured", enabled: boolean) {
   const { tenantUuid, permissions } = await access(session);
+  requirePermission(permissions, "ARTICLE_VIEW");
   requirePermission(permissions, kind === "breaking" ? "ARTICLE_SET_BREAKING" : "ARTICLE_SET_FEATURED");
   const row = await rowForAction(id, tenantUuid);
-  if (!canEditArticleStatus(row.status)) throw validationError(row.status === ArticleStatus.PUBLISHED
-    ? "Unpublish the article before changing Breaking or Featured"
-    : "Article must be in Draft before changing Breaking or Featured");
+  if (row.status === ArticleStatus.PUBLISHED) {
+    throw validationError("Unpublish the article before changing Breaking or Featured");
+  }
+  if (row.status === ArticleStatus.DRAFT) {
+    assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
+  } else if (row.status === ArticleStatus.IN_REVIEW || row.status === ArticleStatus.SCHEDULED) {
+    requirePermission(permissions, "ARTICLE_REVIEW");
+  } else {
+    throw validationError("Breaking and Featured cannot be changed on an archived article");
+  }
+  await assertCanManageArticleAuthor(session, row.createdByUuid);
   const field = kind === "breaking" ? "isBreaking" : "isFeatured";
   await prisma.$transaction(async (tx) => {
     const changed = await tx.article.updateMany({ where: { uuid: row.uuid, tenantUuid, status: row.status }, data: { [field]: enabled } });

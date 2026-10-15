@@ -33,6 +33,8 @@ export const createArticleSchema = z.object({
   }),
   translations: translations.default([]),
   featuredImageUrl: featuredImageUrl.nullish(),
+  isBreaking: z.boolean().optional(),
+  isFeatured: z.boolean().optional(),
 });
 export const updateArticleSchema = createArticleSchema.omit({ tagIds: true, translations: true }).partial().extend({
   tagIds: createArticleSchema.shape.tagIds.removeDefault().optional(),
