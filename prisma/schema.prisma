@@ -74,6 +74,8 @@ model Tenant {
   subcategories    Subcategory[]
   tags             Tag[]
   articles         Article[]
+  articleViews     ArticleView[]
+  articleShares    ArticleShare[]
   createdAt        DateTime             @default(now()) @map("created_at")
   updatedAt        DateTime             @updatedAt @map("updated_at")
   deletedAt        DateTime?            @map("deleted_at")
@@ -480,12 +482,17 @@ model Article {
   tags             ArticleTag[]
   translations     ArticleTranslation[]
   reviews          ArticleReview[]
+  views            ArticleView[]
+  viewCount        Int                  @default(0) @map("view_count")
+  shares           ArticleShare[]
+  shareCount       Int                  @default(0) @map("share_count")
   createdAt        DateTime             @default(now()) @map("created_at")
   updatedAt        DateTime             @updatedAt @map("updated_at")
 
   @@unique([uuid, tenantUuid])
   @@unique([tenantUuid, slug])
   @@index([tenantUuid, status, updatedAt])
+  @@index([tenantUuid, status, publishedAt])
   @@index([status, scheduledAt])
   @@index([tenantUuid, createdByUuid])
   @@map("articles")
@@ -532,4 +539,44 @@ model ArticleTag {
   @@id([articleUuid, tagUuid])
   @@index([tagUuid, tenantUuid])
   @@map("article_tags")
+}
+
+model ArticleView {
+  uuid         String   @id @default(uuid()) @map("uuid")
+  tenantUuid   String   @map("tenant_uuid")
+  tenant       Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  articleUuid  String   @map("article_uuid")
+  article      Article  @relation(fields: [articleUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
+  visitorKey   String   @map("visitor_key")
+  bucketStart  DateTime @map("bucket_start")
+  viewedAt     DateTime @default(now()) @map("viewed_at")
+
+  @@unique([articleUuid, visitorKey, bucketStart])
+  @@index([articleUuid, viewedAt])
+  @@index([tenantUuid, viewedAt])
+  @@map("article_views")
+}
+
+enum ArticleSharePlatform {
+  FACEBOOK
+  TELEGRAM
+  COPY_LINK
+  NATIVE
+}
+
+model ArticleShare {
+  uuid         String               @id @default(uuid()) @map("uuid")
+  tenantUuid   String               @map("tenant_uuid")
+  tenant       Tenant               @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  articleUuid  String               @map("article_uuid")
+  article      Article              @relation(fields: [articleUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
+  platform     ArticleSharePlatform
+  visitorKey   String               @map("visitor_key")
+  bucketStart  DateTime             @map("bucket_start")
+  sharedAt     DateTime             @default(now()) @map("shared_at")
+
+  @@unique([articleUuid, visitorKey, platform, bucketStart], map: "article_shares_dedup_key")
+  @@index([articleUuid, sharedAt])
+  @@index([tenantUuid, sharedAt])
+  @@map("article_shares")
 }

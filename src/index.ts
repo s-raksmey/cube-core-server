@@ -12,8 +12,8 @@ const yoga = createYoga<GraphQLContext>({
   schema,
   context: createContext,
   graphqlEndpoint: "/graphql",
-  // A 1,000 KB image is base64-encoded in the GraphQL mutation.
-  maxRequestBodySize: 1_500_000,
+  // Leave room for a 1,000 KB base64 image and article text in one mutation.
+  maxRequestBodySize: 2_500_000,
   cors: {
     origin: [
       process.env.ADMIN_APP_URL ?? "http://localhost:3000",

@@ -108,6 +108,7 @@ type Category { id: ID!, slug: String!, name: String!, translations: [CategoryTr
 type Subcategory { id: ID!, categoryId: ID!, slug: String!, translations: [SubcategoryTranslation!]!, createdAt: String!, updatedAt: String! }
 
 enum ArticleStatus { DRAFT IN_REVIEW SCHEDULED PUBLISHED ARCHIVED }
+enum ArticleSharePlatform { FACEBOOK TELEGRAM COPY_LINK NATIVE }
 enum ArticleScope { ALL MY REVIEW }
 enum ArticleReviewDecision { SUBMITTED CHANGES_REQUESTED APPROVED }
 type ArticleSummary {
@@ -137,8 +138,11 @@ type PublicWebsiteArticleSummary {
   title: String!
   slug: String!
   summary: String
+  viewCount: Int!
+  shareCount: Int!
   category: PublicWebsiteCategory!
   subcategorySlug: String!
+  subcategory: PublicWebsiteSubcategory!
   isBreaking: Boolean!
   isFeatured: Boolean!
   featuredImageUrl: String
@@ -153,6 +157,9 @@ type PublicWebsiteArticle {
   content: String!
   category: PublicWebsiteCategory!
   subcategorySlug: String!
+  subcategory: PublicWebsiteSubcategory!
+  viewCount: Int!
+  shareCount: Int!
   isBreaking: Boolean!
   isFeatured: Boolean!
   featuredImageUrl: String
@@ -193,16 +200,17 @@ type Article {
   reviews: [ArticleReview!]!
 }
 input ArticleTranslationInput { locale: String!, title: String!, summary: String, content: String! }
+input ArticleImageUploadInput { fileName: String!, mimeType: String!, contentBase64: String! }
 input CreateArticleInput {
   title: String!, slug: String!, summary: String, content: String!,
   categoryId: ID!, subcategoryId: ID!, tagIds: [ID!],
-  translations: [ArticleTranslationInput!], featuredImageUrl: String,
+  translations: [ArticleTranslationInput!], featuredImageUrl: String, thumbnailUpload: ArticleImageUploadInput,
   isBreaking: Boolean, isFeatured: Boolean
 }
 input UpdateArticleInput {
   title: String, slug: String, summary: String, content: String,
   categoryId: ID, subcategoryId: ID, tagIds: [ID!],
-  translations: [ArticleTranslationInput!], featuredImageUrl: String,
+  translations: [ArticleTranslationInput!], featuredImageUrl: String, thumbnailUpload: ArticleImageUploadInput,
   isBreaking: Boolean, isFeatured: Boolean
 }
 
@@ -575,6 +583,8 @@ type Query {
   publicWebsiteTags(tenantId: ID!): [PublicWebsiteTag!]!
   publicWebsiteArticles(tenantId: ID!, categorySlug: String, subcategorySlug: String, tagSlug: String, search: String, featured: Boolean, breaking: Boolean, page: Int = 1, pageSize: Int = 12): PublicWebsiteArticlePage!
   publicWebsiteArticle(tenantId: ID!, slug: String!): PublicWebsiteArticle
+  publicWebsiteRelatedArticles(tenantId: ID!, slug: String!, limit: Int = 4): [PublicWebsiteArticleSummary!]!
+  publicWebsitePopularArticles(tenantId: ID!, limit: Int = 4): [PublicWebsiteArticleSummary!]!
   subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
   subTenant(id: ID!): Tenant!
   tenantByHostname(
@@ -593,6 +603,8 @@ type Query {
 }
 
 type Mutation {
+  recordPublicWebsiteArticleView(hostname: String!, articleId: ID!, visitorId: ID!): Boolean!
+  recordPublicWebsiteArticleShare(hostname: String!, articleId: ID!, visitorId: ID!, platform: ArticleSharePlatform!): Boolean!
   updateTenantBranding(tenantId: ID!, asset: BrandingAsset!, fileName: String!, mimeType: String!, contentBase64: String): TenantBranding!
   updateMyTenantBranding(asset: BrandingAsset!, fileName: String!, mimeType: String!, contentBase64: String): TenantBranding!
   updateMainTenantBranding(asset: BrandingAsset!, fileName: String!, mimeType: String!, contentBase64: String): TenantBranding!
@@ -672,6 +684,7 @@ type Mutation {
   updateTag(id: ID!, input: UpdateTagInput!): Tag!
   deleteTag(id: ID!): Boolean!
   createArticle(input: CreateArticleInput!): Article!
+  uploadArticleImage(articleId: ID, input: ArticleImageUploadInput!): String!
   updateArticle(id: ID!, input: UpdateArticleInput!): Article!
   deleteArticle(id: ID!): Boolean!
   deleteArchivedArticle(id: ID!): Boolean!

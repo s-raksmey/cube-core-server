@@ -14,6 +14,7 @@ export const tenantsArticlesResolver = {
   },
   Mutation: {
     createArticle: (_: unknown, args: { input: unknown }, context: GraphQLContext) => articles.createArticle(session(context), args.input),
+    uploadArticleImage: (_: unknown, args: { articleId?: string | null; input: unknown }, context: GraphQLContext) => articles.uploadArticleImage(session(context), args.articleId, args.input),
     updateArticle: (_: unknown, args: InputArgs, context: GraphQLContext) => articles.updateArticle(session(context), args.id, args.input),
     deleteArticle: (_: unknown, args: ArticleArgs, context: GraphQLContext) => articles.deleteArticle(session(context), args.id),
     deleteArchivedArticle: (_: unknown, args: ArticleArgs, context: GraphQLContext) => articles.deleteArchivedArticle(session(context), args.id),

@@ -1,4 +1,5 @@
 import { ArticleStatus, Prisma, TenantType } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { prisma } from "@/src/lib/db";
@@ -7,7 +8,8 @@ import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import { getTenantUserPermissions, type TenantUserPermission } from "@/src/modules/roles/role-permission.service";
 import { assertArticleTransition, canEditArticleStatus, type ArticleAction } from "./article-policy";
 import { articleAuthorRoles, assertCanManageArticleAuthor } from "./article-role-access";
-import { commentSchema, createArticleSchema, scheduleAtSchema, updateArticleSchema } from "./article-validation";
+import { articleImageUploadSchema, commentSchema, createArticleSchema, scheduleAtSchema, updateArticleSchema } from "./article-validation";
+import { removeArticleThumbnail, saveArticleContentImage, saveArticleThumbnail } from "./article-image.service";
 
 type PermissionSet = Set<TenantUserPermission>;
 
@@ -70,7 +72,7 @@ function mapDetail(row: DetailRow, authorRole: "ADMIN" | "EDITOR" | null) {
 async function rowForAction(id: string, tenantUuid: string) {
   const uuid = parse(z.string().uuid(), id);
   const row = await prisma.article.findFirst({ where: { uuid, tenantUuid },
-    select: { uuid: true, status: true, createdByUuid: true, title: true, content: true,
+    select: { uuid: true, status: true, createdByUuid: true, title: true, content: true, featuredImageUrl: true,
       isBreaking: true, isFeatured: true,
       categoryUuid: true, subcategoryUuid: true, slug: true, scheduledAt: true,
       translations: { select: { locale: true, title: true, content: true } } } });
@@ -140,23 +142,41 @@ export async function getArticle(session: SessionPayload, id: string) {
   return mapDetail(row, roles.get(row.createdByUuid ?? "") ?? null);
 }
 
+export async function uploadArticleImage(session: SessionPayload, articleId: string | null | undefined, input: unknown) {
+  const { tenantUuid, permissions } = await access(session);
+  requirePermission(permissions, "ARTICLE_VIEW");
+  if (articleId) {
+    const row = await rowForAction(articleId, tenantUuid);
+    assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
+    await assertCanManageArticleAuthor(session, row.createdByUuid);
+    if (!canEditArticleStatus(row.status)) throw validationError("Unpublish or unlock this article before uploading images");
+  } else {
+    requirePermission(permissions, "ARTICLE_CREATE");
+  }
+  return saveArticleContentImage(tenantUuid, parse(articleImageUploadSchema, input));
+}
+
 export async function createArticle(session: SessionPayload, input: unknown) {
   const { tenantUuid, permissions } = await access(session);
   requirePermission(permissions, "ARTICLE_VIEW");
   requirePermission(permissions, "ARTICLE_CREATE");
   const data = parse(createArticleSchema, input);
+  if (data.featuredImageUrl?.startsWith("/storage/")) throw validationError("Choose a new thumbnail upload or an HTTPS image URL");
   if (data.isBreaking) requirePermission(permissions, "ARTICLE_SET_BREAKING");
   if (data.isFeatured) requirePermission(permissions, "ARTICLE_SET_FEATURED");
   await validateRelations(tenantUuid, permissions, data.categoryId, data.subcategoryId, data.tagIds);
+  const articleId = randomUUID();
+  const uploadedUrl = data.thumbnailUpload ? await saveArticleThumbnail(tenantUuid, articleId, data.thumbnailUpload) : null;
   try {
-    const article = await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx) => {
       const created = await tx.article.create({ data: {
+        uuid: articleId,
         tenant: { connect: { uuid: tenantUuid } },
         createdBy: { connect: { uuid: session.userId } },
         category: { connect: { uuid_tenantUuid: { uuid: data.categoryId, tenantUuid } } },
         subcategory: { connect: { uuid_tenantUuid_categoryUuid: { uuid: data.subcategoryId, tenantUuid, categoryUuid: data.categoryId } } },
         title: data.title, slug: data.slug, summary: data.summary ?? null,
-        content: data.content, featuredImageUrl: data.featuredImageUrl ?? null,
+        content: data.content, featuredImageUrl: uploadedUrl ?? data.featuredImageUrl ?? null,
         isBreaking: data.isBreaking ?? false, isFeatured: data.isFeatured ?? false,
         translations: { create: data.translations.map((item) => ({ ...item, summary: item.summary ?? null })) },
       }, select: { uuid: true } });
@@ -171,10 +191,12 @@ export async function createArticle(session: SessionPayload, input: unknown) {
           tenantUuid, targetType: "article", targetUuid: created.uuid,
           metadata: { title: data.title, status: "DRAFT" } }, tx);
       }
-      return created;
     });
-    return getArticle(session, article.uuid);
-  } catch (error) { return mapMutationError(error); }
+  } catch (error) {
+    if (uploadedUrl) await removeArticleThumbnail(tenantUuid, articleId, uploadedUrl).catch(() => {});
+    return mapMutationError(error);
+  }
+  return getArticle(session, articleId);
 }
 
 export async function updateArticle(session: SessionPayload, id: string, input: unknown) {
@@ -187,11 +209,16 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
     ? "Published articles must be unpublished before editing"
     : "Article is locked for editing in its current status");
   const data = parse(updateArticleSchema, input);
+  if (data.featuredImageUrl?.startsWith("/storage/") && data.featuredImageUrl !== row.featuredImageUrl) {
+    throw validationError("You cannot select another article's thumbnail");
+  }
   if (data.isBreaking !== undefined) requirePermission(permissions, "ARTICLE_SET_BREAKING");
   if (data.isFeatured !== undefined) requirePermission(permissions, "ARTICLE_SET_FEATURED");
   if (data.categoryId || data.subcategoryId || data.tagIds) {
     await validateRelations(tenantUuid, permissions, data.categoryId ?? row.categoryUuid, data.subcategoryId ?? row.subcategoryUuid, data.tagIds ?? []);
   }
+  const uploadedUrl = data.thumbnailUpload ? await saveArticleThumbnail(tenantUuid, row.uuid, data.thumbnailUpload) : null;
+  const nextImageUrl = uploadedUrl ?? data.featuredImageUrl;
   try {
     await prisma.$transaction(async (tx) => {
       await tx.article.update({ where: { uuid: row.uuid, tenantUuid, status: row.status }, data: {
@@ -200,7 +227,7 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
         ...(data.categoryId || data.subcategoryId ? { subcategory: { connect: { uuid_tenantUuid_categoryUuid: {
           uuid: data.subcategoryId ?? row.subcategoryUuid, tenantUuid, categoryUuid: data.categoryId ?? row.categoryUuid,
         } } } } : {}),
-        featuredImageUrl: data.featuredImageUrl,
+        featuredImageUrl: nextImageUrl,
         isBreaking: data.isBreaking, isFeatured: data.isFeatured,
         ...(data.translations ? { translations: { deleteMany: {}, create: data.translations.map((item) => ({ ...item, summary: item.summary ?? null })) } } : {}),
       }, select: { uuid: true } });
@@ -219,8 +246,14 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
       await writeAuthAudit({ action: "ARTICLE_UPDATED", actorUserUuid: session.userId, tenantUuid,
         targetType: "article", targetUuid: row.uuid, metadata: { changed: Object.keys(data), status: row.status } }, tx);
     });
-    return getArticle(session, row.uuid);
-  } catch (error) { return mapMutationError(error); }
+  } catch (error) {
+    if (uploadedUrl) await removeArticleThumbnail(tenantUuid, row.uuid, uploadedUrl).catch(() => {});
+    return mapMutationError(error);
+  }
+  if (nextImageUrl !== undefined && nextImageUrl !== row.featuredImageUrl) {
+    await removeArticleThumbnail(tenantUuid, row.uuid, row.featuredImageUrl).catch(() => {});
+  }
+  return getArticle(session, row.uuid);
 }
 
 export async function deleteArticle(session: SessionPayload, id: string) {
@@ -236,6 +269,7 @@ export async function deleteArticle(session: SessionPayload, id: string) {
       await writeAuthAudit({ action: "ARTICLE_DELETED", actorUserUuid: session.userId, tenantUuid,
         targetType: "article", targetUuid: row.uuid, metadata: { title: row.title, previousStatus: row.status } }, tx);
     });
+    await removeArticleThumbnail(tenantUuid, row.uuid, row.featuredImageUrl).catch(() => {});
     return true;
   } catch (error) { return mapMutationError(error); }
 }
@@ -253,6 +287,7 @@ export async function deleteArchivedArticle(session: SessionPayload, id: string)
       await writeAuthAudit({ action: "ARTICLE_PERMANENTLY_DELETED", actorUserUuid: session.userId, tenantUuid,
         targetType: "article", targetUuid: row.uuid, metadata: { title: row.title, previousStatus: row.status } }, tx);
     });
+    await removeArticleThumbnail(tenantUuid, row.uuid, row.featuredImageUrl).catch(() => {});
     return true;
   } catch (error) { return mapMutationError(error); }
 }

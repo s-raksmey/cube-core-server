@@ -5,10 +5,15 @@ const markdown = z.string().max(100_000).refine(
   (content) => !/<\s*\/?\s*[a-z!][^>]*>/i.test(content),
   "Raw HTML is not supported in article content",
 );
-const featuredImageUrl = z.string().trim().url().max(2048).refine(
-  (value) => new URL(value).protocol === "https:",
+const featuredImageUrl = z.string().trim().max(2048).refine(
+  (value) => value.startsWith("/storage/tenants/") || (URL.canParse(value) && new URL(value).protocol === "https:"),
   "Featured image URL must use HTTPS",
 );
+export const articleImageUploadSchema = z.object({
+  fileName: z.string().trim().min(1).max(255),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+  contentBase64: z.string().min(1).max(Math.ceil((1000 * 1024) / 3) * 4),
+});
 export const articleTranslationSchema = z.object({
   locale: z.string().trim().toLowerCase().regex(/^[a-z]{2,8}(?:-[a-z0-9]{2,8})?$/)
     .refine((value) => value !== "en", "English is the default article language"),
@@ -33,6 +38,7 @@ export const createArticleSchema = z.object({
   }),
   translations: translations.default([]),
   featuredImageUrl: featuredImageUrl.nullish(),
+  thumbnailUpload: articleImageUploadSchema.optional(),
   isBreaking: z.boolean().optional(),
   isFeatured: z.boolean().optional(),
 });
