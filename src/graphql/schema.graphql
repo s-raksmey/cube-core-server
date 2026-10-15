@@ -79,9 +79,11 @@ enum TenantUserPermission {
   ARTICLE_UPDATE_ANY
   ARTICLE_DELETE_OWN
   ARTICLE_DELETE_ANY
+  ARTICLE_DELETE_ARCHIVED
   ARTICLE_SUBMIT
   ARTICLE_REVIEW
   ARTICLE_PUBLISH
+  ARTICLE_UNPUBLISH
   ARTICLE_SCHEDULE
   ARTICLE_ARCHIVE
   ARTICLE_RESTORE
@@ -123,6 +125,41 @@ type ArticleSummary {
   updatedAt: String!
 }
 type ArticlePage { items: [ArticleSummary!]!, total: Int!, page: Int!, pageSize: Int! }
+type PublicWebsiteCategory { id: ID!, slug: String!, name: String!, translations: [CategoryTranslation!]! }
+type PublicWebsiteSubcategory { slug: String!, translations: [SubcategoryTranslation!]! }
+type PublicWebsiteNavigationCategory { id: ID!, slug: String!, name: String!, translations: [CategoryTranslation!]!, subcategories: [PublicWebsiteSubcategory!]! }
+type PublicWebsiteTag { slug: String!, name: String!, translations: [TagTranslation!]! }
+type PublicWebsiteArticleLocale { locale: String!, title: String!, summary: String }
+type PublicWebsiteArticleSummary {
+  id: ID!
+  title: String!
+  slug: String!
+  summary: String
+  category: PublicWebsiteCategory!
+  subcategorySlug: String!
+  isBreaking: Boolean!
+  isFeatured: Boolean!
+  featuredImageUrl: String
+  publishedAt: String!
+  translations: [PublicWebsiteArticleLocale!]!
+}
+type PublicWebsiteArticle {
+  id: ID!
+  title: String!
+  slug: String!
+  summary: String
+  content: String!
+  category: PublicWebsiteCategory!
+  subcategorySlug: String!
+  isBreaking: Boolean!
+  isFeatured: Boolean!
+  featuredImageUrl: String
+  publishedAt: String!
+  authorName: String
+  translations: [ArticleTranslation!]!
+  tags: [PublicWebsiteTag!]!
+}
+type PublicWebsiteArticlePage { items: [PublicWebsiteArticleSummary!]!, total: Int!, page: Int!, pageSize: Int! }
 type ArticleTag { id: ID!, name: String! }
 type ArticleTranslation { locale: String!, title: String!, summary: String, content: String! }
 type ArticleReview { id: ID!, decision: ArticleReviewDecision!, comment: String, reviewerName: String, createdAt: String! }
@@ -529,6 +566,10 @@ type Query {
   tag(id: ID!): Tag
   articles(search: String, status: ArticleStatus, categoryId: ID, scope: ArticleScope, page: Int, pageSize: Int): ArticlePage!
   article(id: ID!): Article
+  publicWebsiteCategories(tenantId: ID!): [PublicWebsiteNavigationCategory!]!
+  publicWebsiteTags(tenantId: ID!): [PublicWebsiteTag!]!
+  publicWebsiteArticles(tenantId: ID!, categorySlug: String, subcategorySlug: String, tagSlug: String, search: String, featured: Boolean, breaking: Boolean, page: Int = 1, pageSize: Int = 12): PublicWebsiteArticlePage!
+  publicWebsiteArticle(tenantId: ID!, slug: String!): PublicWebsiteArticle
   subTenants(search: String, page: Int, pageSize: Int): SubTenantPage!
   subTenant(id: ID!): Tenant!
   tenantByHostname(
@@ -628,9 +669,11 @@ type Mutation {
   createArticle(input: CreateArticleInput!): Article!
   updateArticle(id: ID!, input: UpdateArticleInput!): Article!
   deleteArticle(id: ID!): Boolean!
+  deleteArchivedArticle(id: ID!): Boolean!
   submitArticleForReview(id: ID!): Article!
   requestArticleChanges(id: ID!, comment: String!): Article!
   publishArticle(id: ID!): Article!
+  unpublishArticle(id: ID!): Article!
   scheduleArticle(id: ID!, scheduledAt: String!): Article!
   updateArticleSchedule(id: ID!, scheduledAt: String!): Article!
   cancelArticleSchedule(id: ID!): Article!

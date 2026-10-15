@@ -166,7 +166,9 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
   const { tenantUuid, permissions } = await access(session);
   const row = await rowForAction(id, tenantUuid);
   assertOwnOrAny(row, session, permissions, "ARTICLE_UPDATE_OWN", "ARTICLE_UPDATE_ANY");
-  if (!canEditArticleStatus(row.status, permissions.has("ARTICLE_UPDATE_ANY"))) throw validationError("Article is locked for editing in its current status");
+  if (!canEditArticleStatus(row.status)) throw validationError(row.status === ArticleStatus.PUBLISHED
+    ? "Published articles must be unpublished before editing"
+    : "Article is locked for editing in its current status");
   const data = parse(updateArticleSchema, input);
   if (data.categoryId || data.subcategoryId || data.tagIds) {
     await validateRelations(tenantUuid, permissions, data.categoryId ?? row.categoryUuid, data.subcategoryId ?? row.subcategoryUuid, data.tagIds ?? []);
@@ -210,20 +212,35 @@ export async function deleteArticle(session: SessionPayload, id: string) {
   } catch (error) { return mapMutationError(error); }
 }
 
-type WorkflowAction = Exclude<ArticleAction, "delete">;
+export async function deleteArchivedArticle(session: SessionPayload, id: string) {
+  const { tenantUuid, permissions } = await access(session);
+  requirePermission(permissions, "ARTICLE_DELETE_ARCHIVED");
+  const row = await rowForAction(id, tenantUuid);
+  assertArticleTransition(row.status, "deleteArchived");
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.article.delete({ where: { uuid: row.uuid, tenantUuid, status: ArticleStatus.ARCHIVED } });
+      await writeAuthAudit({ action: "ARTICLE_PERMANENTLY_DELETED", actorUserUuid: session.userId, tenantUuid,
+        targetType: "article", targetUuid: row.uuid, metadata: { title: row.title, previousStatus: row.status } }, tx);
+    });
+    return true;
+  } catch (error) { return mapMutationError(error); }
+}
+
+type WorkflowAction = Exclude<ArticleAction, "delete" | "deleteArchived">;
 const workflowPermissions: Record<WorkflowAction, TenantUserPermission> = {
   submit: "ARTICLE_SUBMIT", requestChanges: "ARTICLE_REVIEW", publish: "ARTICLE_PUBLISH",
-  schedule: "ARTICLE_SCHEDULE", reschedule: "ARTICLE_SCHEDULE", cancelSchedule: "ARTICLE_SCHEDULE",
+  schedule: "ARTICLE_SCHEDULE", reschedule: "ARTICLE_SCHEDULE", cancelSchedule: "ARTICLE_SCHEDULE", unpublish: "ARTICLE_UNPUBLISH",
   archive: "ARTICLE_ARCHIVE", restore: "ARTICLE_RESTORE",
 };
 const nextStatus: Record<WorkflowAction, ArticleStatus> = {
   submit: ArticleStatus.IN_REVIEW, requestChanges: ArticleStatus.DRAFT, publish: ArticleStatus.PUBLISHED,
-  schedule: ArticleStatus.SCHEDULED, reschedule: ArticleStatus.SCHEDULED, cancelSchedule: ArticleStatus.DRAFT,
-  archive: ArticleStatus.ARCHIVED, restore: ArticleStatus.PUBLISHED,
+  schedule: ArticleStatus.SCHEDULED, reschedule: ArticleStatus.SCHEDULED, cancelSchedule: ArticleStatus.DRAFT, unpublish: ArticleStatus.DRAFT,
+  archive: ArticleStatus.ARCHIVED, restore: ArticleStatus.DRAFT,
 };
 const auditActions: Record<WorkflowAction, string> = {
   submit: "ARTICLE_REVIEW_SUBMITTED", requestChanges: "ARTICLE_CHANGES_REQUESTED", publish: "ARTICLE_PUBLISHED",
-  schedule: "ARTICLE_SCHEDULED", reschedule: "ARTICLE_SCHEDULE_UPDATED", cancelSchedule: "ARTICLE_SCHEDULE_CANCELLED",
+  schedule: "ARTICLE_SCHEDULED", reschedule: "ARTICLE_SCHEDULE_UPDATED", cancelSchedule: "ARTICLE_SCHEDULE_CANCELLED", unpublish: "ARTICLE_UNPUBLISHED",
   archive: "ARTICLE_ARCHIVED", restore: "ARTICLE_RESTORED",
 };
 
@@ -271,10 +288,13 @@ export async function setArticlePresentation(session: SessionPayload, id: string
   const { tenantUuid, permissions } = await access(session);
   requirePermission(permissions, kind === "breaking" ? "ARTICLE_SET_BREAKING" : "ARTICLE_SET_FEATURED");
   const row = await rowForAction(id, tenantUuid);
-  if (row.status === ArticleStatus.ARCHIVED) throw validationError("Restore the article before changing presentation flags");
+  if (!canEditArticleStatus(row.status)) throw validationError(row.status === ArticleStatus.PUBLISHED
+    ? "Unpublish the article before changing Breaking or Featured"
+    : "Article must be in Draft before changing Breaking or Featured");
   const field = kind === "breaking" ? "isBreaking" : "isFeatured";
   await prisma.$transaction(async (tx) => {
-    await tx.article.update({ where: { uuid: row.uuid, tenantUuid }, data: { [field]: enabled } });
+    const changed = await tx.article.updateMany({ where: { uuid: row.uuid, tenantUuid, status: row.status }, data: { [field]: enabled } });
+    if (changed.count !== 1) throw validationError("Article changed while this action was in progress. Refresh and try again");
     await writeAuthAudit({ action: `ARTICLE_${kind.toUpperCase()}_${enabled ? "ENABLED" : "DISABLED"}`,
       actorUserUuid: session.userId, tenantUuid, targetType: "article", targetUuid: row.uuid,
       metadata: { title: row.title, status: row.status } }, tx);

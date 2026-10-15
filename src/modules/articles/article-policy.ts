@@ -3,7 +3,7 @@ import { validationError } from "@/src/lib/errors";
 
 export type ArticleAction =
   | "submit" | "requestChanges" | "publish" | "schedule"
-  | "reschedule" | "cancelSchedule" | "archive" | "restore" | "delete";
+  | "reschedule" | "cancelSchedule" | "unpublish" | "archive" | "restore" | "delete" | "deleteArchived";
 
 const allowedSources: Record<ArticleAction, readonly ArticleStatus[]> = {
   submit: [ArticleStatus.DRAFT],
@@ -12,9 +12,11 @@ const allowedSources: Record<ArticleAction, readonly ArticleStatus[]> = {
   schedule: [ArticleStatus.DRAFT, ArticleStatus.IN_REVIEW],
   reschedule: [ArticleStatus.SCHEDULED],
   cancelSchedule: [ArticleStatus.SCHEDULED],
-  archive: [ArticleStatus.PUBLISHED],
+  unpublish: [ArticleStatus.PUBLISHED],
+  archive: [ArticleStatus.DRAFT],
   restore: [ArticleStatus.ARCHIVED],
   delete: [ArticleStatus.DRAFT],
+  deleteArchived: [ArticleStatus.ARCHIVED],
 };
 
 export function assertArticleTransition(status: ArticleStatus, action: ArticleAction) {
@@ -23,7 +25,6 @@ export function assertArticleTransition(status: ArticleStatus, action: ArticleAc
   }
 }
 
-export function canEditArticleStatus(status: ArticleStatus, canEditAny: boolean) {
-  return status === ArticleStatus.DRAFT ||
-    (canEditAny && (status === ArticleStatus.IN_REVIEW || status === ArticleStatus.PUBLISHED));
+export function canEditArticleStatus(status: ArticleStatus) {
+  return status === ArticleStatus.DRAFT;
 }

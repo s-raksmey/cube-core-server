@@ -73,7 +73,9 @@ describe("normalizeTenantHostname", () => {
     });
     expect(tenantFindFirst).toHaveBeenCalledWith({
       where: { slug: "cam-bo-site", type: "SUB", status: "ACTIVE", deletedAt: null },
-      select: { uuid: true, name: true, slug: true, type: true, status: true },
+      select: expect.objectContaining({ uuid: true, name: true, slug: true, type: true, status: true,
+        branding: expect.objectContaining({ select: expect.objectContaining({ websiteLogoPath: true, openGraphImagePath: true }) }),
+      }),
     });
   });
 
@@ -95,7 +97,9 @@ describe("normalizeTenantHostname", () => {
         status: "ACTIVE",
         deletedAt: null,
       },
-      select: { uuid: true, name: true, slug: true, type: true, status: true },
+      select: expect.objectContaining({ uuid: true, name: true, slug: true, type: true, status: true,
+        branding: expect.objectContaining({ select: expect.objectContaining({ websiteLogoPath: true, openGraphImagePath: true }) }),
+      }),
     });
   });
 
