@@ -23,7 +23,7 @@ One `tenants` table (`MAIN` / `SUB`). **Users are unified**:
 | --- | --- |
 | `users` | Identity: names, optional username, unique email, password hash, status `PENDING` \| `ACTIVE` \| `LOCKED` \| `INACTIVE` |
 | `roles` | Seeded: `SUPERADMIN`, `ADMIN`, `EDITOR` |
-| `role_permissions` | SuperAdmin-configured user-management permissions for the SUB `ADMIN` and `EDITOR` roles |
+| `role_permissions` | SuperAdmin-configured permissions for the SUB `ADMIN` and `EDITOR` roles |
 | `tenant_memberships` | Unique `(user_uuid, tenant_uuid)` + role |
 
 | Role | Tenant type | Responsibility |
@@ -70,7 +70,7 @@ Only **Admin** and **Editor** may hold a login scoped to a sub-tenant.
 
 The Main Console owns the shared permission sets for the `ADMIN` and `EDITOR`
 roles. They apply to those roles in every sub-tenant and are enforced by the
-server on each user-management operation. The current permissions are:
+server on permission-gated operations. User-management permissions include:
 
 - View users
 - Create users
@@ -82,7 +82,10 @@ server on each user-management operation. The current permissions are:
 - Delete users
 
 New databases give `ADMIN` View, Create, Edit, Activate, Suspend, and Reset
-Password permissions. `EDITOR` starts with no user-management permissions.
+Password permissions. `EDITOR` starts with View and own-profile Edit permissions.
+For analytics, `ADMIN` starts with `ANALYTICS_VIEW_TENANT` and `EDITOR` with
+`ANALYTICS_VIEW_OWN`. The service derives tenant and author scope from the
+authenticated session and the granted permission; see [ANALYTICS.md](./ANALYTICS.md).
 `SUPERADMIN` remains a fixed Main Tenant role and is not configurable here.
 
 ## Activation lifecycle

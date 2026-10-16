@@ -1,4 +1,5 @@
 import {
+  ArticleStatus,
   MembershipStatus,
   Prisma,
   TenantStatus,
@@ -8,7 +9,6 @@ import {
 import { prisma } from "@/src/lib/db";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { forbidden } from "@/src/lib/errors";
-import { displayFullName } from "@/src/modules/users/account";
 import { getTenantUserPermissions } from "@/src/modules/roles/role-permission.service";
 
 const AUDIT_LOG_PAGE_SIZE = 10;
@@ -262,15 +262,25 @@ export async function getTenantDashboard(session: SessionPayload) {
 
   const tenant = await prisma.tenant.findUnique({
     where: { uuid: session.tenantId },
+    select: { uuid: true, name: true, slug: true, type: true, status: true, createdAt: true },
   });
 
   if (!tenant || tenant.type !== TenantType.SUB) {
     throw forbidden("Invalid sub-tenant session");
   }
 
-  const canViewUsers = (await getTenantUserPermissions(session)).includes("USERS_VIEW");
+  const permissions = await getTenantUserPermissions(session);
+  const canViewUsers = permissions.includes("USERS_VIEW");
+  const canViewTenantAnalytics = permissions.includes("ANALYTICS_VIEW_TENANT");
+  const canViewOwnAnalytics = permissions.includes("ANALYTICS_VIEW_OWN");
+  const articleScope = canViewTenantAnalytics || canViewOwnAnalytics
+    ? { tenantUuid: session.tenantId, ...(!canViewTenantAnalytics ? { createdByUuid: session.userId } : {}) }
+    : null;
+  const activitySince = startOfMonthsAgo(6);
+  const activityUntil = new Date();
+  const ownerFilter = canViewTenantAnalytics ? Prisma.empty : Prisma.sql`AND a."created_by_uuid" = ${session.userId}`;
 
-  const [totalUsers, activeUsers, recentMemberships, auditLogs] =
+  const [totalUsers, activeUsers, statusRows, publishingRows, engagementRows] =
     await Promise.all([
       canViewUsers ? prisma.tenantMembership.count({
         where: {
@@ -284,40 +294,49 @@ export async function getTenantDashboard(session: SessionPayload) {
           user: { deletedAt: null, status: UserStatus.ACTIVE },
         },
       }) : Promise.resolve(0),
-      canViewUsers ? prisma.tenantMembership.findMany({
-        where: {
-          tenantUuid: session.tenantId,
-          user: { deletedAt: null },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 8,
-        select: {
-          role: { select: { code: true } },
-          user: {
-            select: {
-              uuid: true,
-              email: true,
-              username: true,
-              firstName: true,
-              lastName: true,
-              status: true,
-              createdAt: true,
-            },
-          },
-        },
+      articleScope ? prisma.article.groupBy({
+        by: ["status"], where: articleScope, _count: { _all: true },
       }) : Promise.resolve([]),
-      prisma.auditLog.findMany({
-        where: { tenantUuid: session.tenantId },
-        orderBy: { createdAt: "desc" },
-        take: 8,
-        select: {
-          uuid: true,
-          action: true,
-          createdAt: true,
-          actorUser: { select: { email: true } },
-        },
-      }),
+      articleScope ? prisma.$queryRaw<{ month: string; count: number }[]>(Prisma.sql`
+        SELECT to_char(date_trunc('month', a."published_at"), 'YYYY-MM') AS month,
+               count(*)::int AS count
+        FROM "articles" a
+        WHERE a."tenant_uuid" = ${session.tenantId}
+          AND a."published_at" >= ${activitySince} AND a."published_at" < ${activityUntil}
+          ${ownerFilter}
+        GROUP BY 1 ORDER BY 1
+      `) : Promise.resolve([]),
+      articleScope ? prisma.$queryRaw<{ source: string; month: string; count: number }[]>(Prisma.sql`
+        SELECT 'VIEWS' AS source, to_char(date_trunc('month', v."viewed_at"), 'YYYY-MM') AS month,
+               count(*)::int AS count
+        FROM "article_views" v
+        JOIN "articles" a ON a."uuid" = v."article_uuid" AND a."tenant_uuid" = v."tenant_uuid"
+        WHERE v."tenant_uuid" = ${session.tenantId}
+          AND v."viewed_at" >= ${activitySince} AND v."viewed_at" < ${activityUntil}
+          ${ownerFilter}
+        GROUP BY 2
+        UNION ALL
+        SELECT 'SHARES' AS source, to_char(date_trunc('month', s."shared_at"), 'YYYY-MM') AS month,
+               count(*)::int AS count
+        FROM "article_shares" s
+        JOIN "articles" a ON a."uuid" = s."article_uuid" AND a."tenant_uuid" = s."tenant_uuid"
+        WHERE s."tenant_uuid" = ${session.tenantId}
+          AND s."shared_at" >= ${activitySince} AND s."shared_at" < ${activityUntil}
+          ${ownerFilter}
+        GROUP BY 2
+      `) : Promise.resolve([]),
     ]);
+
+  const publishedByMonth = new Map(publishingRows.map((row) => [row.month, row.count]));
+  const countByStatus = new Map(statusRows.map((row) => [row.status, row._count._all]));
+  const viewsByMonth = new Map(engagementRows.filter((row) => row.source === "VIEWS").map((row) => [row.month, row.count]));
+  const sharesByMonth = new Map(engagementRows.filter((row) => row.source === "SHARES").map((row) => [row.month, row.count]));
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const date = new Date(activitySince);
+    date.setUTCMonth(date.getUTCMonth() + i);
+    return monthKey(date);
+  });
+  const monthCounts = (counts: Map<string, number>) => months.map((month) => ({ month, count: counts.get(month) ?? 0 }));
 
   return {
     tenant: {
@@ -331,35 +350,12 @@ export async function getTenantDashboard(session: SessionPayload) {
     },
     totalUsers,
     activeUsers,
-    publishedContent: 0,
-    mediaStorageBytes: 0,
-    contentActivityByMonth: Array.from({ length: 6 }, (_, i) => {
-      const d = startOfMonthsAgo(6);
-      d.setUTCMonth(d.getUTCMonth() + i);
-      return { month: monthKey(d), count: 0 };
-    }),
-    contentByStatus: [
-      { status: "DRAFT", count: 0 },
-      { status: "PUBLISHED", count: 0 },
-    ],
-    recentUsers: recentMemberships.map((row) => ({
-      id: row.user.uuid,
-      email: row.user.email,
-      username: row.user.username,
-      firstName: row.user.firstName,
-      lastName: row.user.lastName,
-      fullName: displayFullName(row.user),
-      type: "SUB",
-      role: row.role.code,
-      status: row.user.status,
-      tenantId: session.tenantId,
-      createdAt: row.user.createdAt,
-    })),
-    recentActivity: auditLogs.map((log) => ({
-      id: log.uuid,
-      action: log.action,
-      createdAt: log.createdAt,
-      actorEmail: log.actorUser?.email ?? null,
-    })),
+    publishedContent: countByStatus.get(ArticleStatus.PUBLISHED) ?? 0,
+    contentActivityByMonth: monthCounts(publishedByMonth),
+    contentByStatus: articleScope
+      ? Object.values(ArticleStatus).map((status) => ({ status, count: countByStatus.get(status) ?? 0 }))
+      : [],
+    viewsByMonth: monthCounts(viewsByMonth),
+    sharesByMonth: monthCounts(sharesByMonth),
   };
 }

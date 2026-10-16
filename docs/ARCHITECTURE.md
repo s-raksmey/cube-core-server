@@ -273,6 +273,8 @@ Revisit schema-per-tenant or DB-per-tenant only if compliance/contracts require 
 
 ## Cross-cutting concerns
 
+The read-only analytics scopes, sources, UTC periods, and unsupported metrics are documented in [ANALYTICS.md](./ANALYTICS.md).
+
 | Concern | Approach |
 | --- | --- |
 | Validation | Shared Zod schemas at service boundary |

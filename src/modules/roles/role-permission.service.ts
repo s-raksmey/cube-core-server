@@ -30,6 +30,7 @@ export const tenantUserPermissionCodes = [
   "ARTICLE_DELETE_OWN", "ARTICLE_DELETE_ANY", "ARTICLE_DELETE_ARCHIVED", "ARTICLE_SUBMIT", "ARTICLE_REVIEW", "ARTICLE_REQUEST_CHANGES",
   "ARTICLE_PUBLISH", "ARTICLE_UNPUBLISH", "ARTICLE_SCHEDULE", "ARTICLE_ARCHIVE", "ARTICLE_RESTORE",
   "ARTICLE_SET_BREAKING", "ARTICLE_SET_FEATURED",
+  "ANALYTICS_VIEW_TENANT", "ANALYTICS_VIEW_OWN",
 ] as const;
 
 export const articlePermissionCodes = tenantUserPermissionCodes.filter(
@@ -46,6 +47,7 @@ export const allowedEditorUserPermissions = [
   "CATEGORY_VIEW",
   "CATEGORY_VIEW_SUBCATEGORY",
   "TAG_VIEW",
+  "ANALYTICS_VIEW_OWN",
   ...articlePermissionCodes,
 ] as const satisfies readonly TenantUserPermission[];
 

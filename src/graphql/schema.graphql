@@ -90,6 +90,8 @@ enum TenantUserPermission {
   ARTICLE_RESTORE
   ARTICLE_SET_BREAKING
   ARTICLE_SET_FEATURED
+  ANALYTICS_VIEW_TENANT
+  ANALYTICS_VIEW_OWN
 }
 
 input TranslationInput { locale: String!, name: String! }
@@ -497,11 +499,39 @@ type TenantDashboard {
   totalUsers: Int!
   activeUsers: Int!
   publishedContent: Int!
-  mediaStorageBytes: Int!
   contentActivityByMonth: [MonthCount!]!
   contentByStatus: [StatusCount!]!
-  recentUsers: [User!]!
-  recentActivity: [ActivityItem!]!
+  viewsByMonth: [MonthCount!]!
+  sharesByMonth: [MonthCount!]!
+}
+
+enum AnalyticsPeriod { LAST_7_DAYS LAST_30_DAYS LAST_90_DAYS LAST_180_DAYS LAST_365_DAYS CUSTOM }
+enum AnalyticsScope { TENANT OWN }
+input AnalyticsRangeInput { period: AnalyticsPeriod = LAST_30_DAYS, from: String, to: String }
+type AnalyticsMetric { value: Int!, previousValue: Int!, percentChange: Float }
+type AnalyticsPoint { date: String!, value: Int! }
+type AnalyticsStatus { name: String!, count: Int! }
+type AnalyticsPerformance { id: ID!, name: String!, views: Int!, shares: Int! }
+type AnalyticsArticle { id: ID!, name: String!, status: ArticleStatus! }
+type AnalyticsPresentation { published: Int!, views: Int!, shares: Int! }
+type AnalyticsReview { submitted: Int!, changesRequested: Int!, approved: Int!, averageReviewHours: Float, waiting: Int! }
+type AnalyticsAuthorActivity { id: ID!, name: String!, created: Int!, submitted: Int!, published: Int! }
+type AnalyticsTenantActivity { name: String!, count: Int! }
+type PlatformAnalytics {
+  start: String!, end: String!, grouping: String!
+  totalTenants: Int!, activeTenants: Int!, suspendedTenants: Int!, tenantUsers: Int!
+  growth: [AnalyticsPoint!]!, tenantActivity: [AnalyticsTenantActivity!]!
+}
+type TenantAnalytics {
+  scope: AnalyticsScope!, start: String!, end: String!, grouping: String!
+  totalArticles: Int!, statusCounts: [AnalyticsStatus!]!
+  views: AnalyticsMetric!, shares: AnalyticsMetric!, published: AnalyticsMetric!
+  viewsOverTime: [AnalyticsPoint!]!, sharesOverTime: [AnalyticsPoint!]!, publishingOverTime: [AnalyticsPoint!]!
+  mostViewed: [AnalyticsPerformance!]!, mostShared: [AnalyticsPerformance!]!
+  recentArticles: [AnalyticsArticle!]!
+  categories: [AnalyticsPerformance!]!, subcategories: [AnalyticsPerformance!]!, tags: [AnalyticsPerformance!]!
+  breaking: AnalyticsPresentation, featured: AnalyticsPresentation
+  sharePlatforms: [AnalyticsStatus!]!, reviews: AnalyticsReview, authorActivity: [AnalyticsAuthorActivity!]!
 }
 
 type SubTenantPage {
@@ -569,6 +599,8 @@ type Query {
   me: User
   platformDashboard: PlatformDashboard!
   tenantDashboard: TenantDashboard!
+  platformAnalytics(range: AnalyticsRangeInput): PlatformAnalytics!
+  tenantAnalytics(range: AnalyticsRangeInput): TenantAnalytics!
   platformAuditLogs(page: Int): AuditLogPage!
   tenantAuditLogs(page: Int): AuditLogPage!
   categories(search: String): [Category!]!

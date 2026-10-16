@@ -405,6 +405,7 @@ model AuditLog {
   @@index([actorUserUuid])
   @@index([tenantUuid])
   @@index([createdAt])
+  @@index([tenantUuid, createdAt])
   @@map("audit_logs")
 }
 
@@ -495,6 +496,7 @@ model Article {
   @@index([tenantUuid, status, publishedAt])
   @@index([status, scheduledAt])
   @@index([tenantUuid, createdByUuid])
+  @@index([tenantUuid, createdByUuid, publishedAt])
   @@map("articles")
 }
 
@@ -526,6 +528,7 @@ model ArticleReview {
   createdAt    DateTime              @default(now()) @map("created_at")
 
   @@index([tenantUuid, articleUuid, createdAt])
+  @@index([tenantUuid, createdAt])
   @@map("article_reviews")
 }
 
