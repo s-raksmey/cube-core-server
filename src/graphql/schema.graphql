@@ -59,8 +59,8 @@ enum TenantUserPermission {
   USERS_SUSPEND
   USERS_RESET_PASSWORD
   USERS_DELETE
-  BRANDING_VIEW
-  BRANDING_UPDATE
+  SETTINGS_VIEW
+  SETTINGS_UPDATE
   CATEGORY_VIEW
   CATEGORY_VIEW_SUBCATEGORY
   CATEGORY_CREATE
@@ -264,6 +264,118 @@ type TenantBranding {
   faviconUrl: String
   publicWebsiteFaviconUrl: String
   openGraphImageUrl: String
+}
+
+type GeneralSettings {
+  siteName: String!
+  siteDescription: String!
+  contactEmail: String!
+  phone: String!
+  secondaryPhone: String
+  address: String!
+}
+
+type PublicGeneralSettings {
+  tenantId: ID!
+  siteName: String!
+  siteDescription: String!
+  contactEmail: String!
+  phone: String!
+  secondaryPhone: String
+  address: String!
+  website: PublicWebsiteSettings!
+  socialLinks: [PublicSocialLink!]!
+  seo: PublicSeoSettings
+}
+
+type SeoSettings {
+  allowIndexing: Boolean!
+  metaTitle: String!
+  metaDescription: String!
+  ogTitle: String!
+  ogDescription: String!
+  defaultOgImageUrl: String
+}
+
+enum BreakingDurationUnit { HOURS DAYS }
+
+type ContentSettings {
+  breakingDurationValue: Int!
+  breakingDurationUnit: BreakingDurationUnit!
+}
+
+input UpdateContentSettingsInput {
+  breakingDurationValue: Int!
+  breakingDurationUnit: BreakingDurationUnit!
+}
+
+type PublicSeoSettings {
+  allowIndexing: Boolean!
+  metaTitle: String!
+  metaDescription: String!
+  ogTitle: String!
+  ogDescription: String!
+  defaultOgImageUrl: String
+}
+
+input UpdateSeoSettingsInput {
+  allowIndexing: Boolean!
+  metaTitle: String!
+  metaDescription: String!
+  ogTitle: String!
+  ogDescription: String!
+}
+
+input SeoImageInput {
+  fileName: String!
+  mimeType: String!
+  contentBase64: String
+}
+
+enum SocialPlatform { FACEBOOK TELEGRAM YOUTUBE TIKTOK INSTAGRAM X LINKEDIN }
+
+type TenantSocialLink {
+  platform: SocialPlatform!
+  url: String!
+  enabled: Boolean!
+  sortOrder: Int!
+}
+
+type PublicSocialLink {
+  platform: SocialPlatform!
+  url: String!
+  sortOrder: Int!
+}
+
+input SaveSocialLinkInput {
+  platform: SocialPlatform!
+  url: String!
+  enabled: Boolean!
+  sortOrder: Int!
+}
+
+type WebsiteSettings {
+  maintenanceMode: Boolean!
+  maintenanceMessage: String
+}
+
+type PublicWebsiteSettings {
+  maintenanceMode: Boolean!
+  maintenanceMessage: String
+}
+
+input UpdateWebsiteSettingsInput {
+  maintenanceMode: Boolean!
+  maintenanceMessage: String
+}
+
+input UpdateGeneralSettingsInput {
+  siteName: String!
+  siteDescription: String!
+  contactEmail: String!
+  phone: String!
+  secondaryPhone: String
+  address: String!
 }
 
 type TenantDomainVerification {
@@ -601,6 +713,12 @@ type Query {
   tenantDashboard: TenantDashboard!
   platformAnalytics(range: AnalyticsRangeInput): PlatformAnalytics!
   tenantAnalytics(range: AnalyticsRangeInput): TenantAnalytics!
+  myGeneralSettings: GeneralSettings!
+  myWebsiteSettings: WebsiteSettings!
+  mySocialLinks: [TenantSocialLink!]!
+  mySeoSettings: SeoSettings!
+  myContentSettings: ContentSettings!
+  publicGeneralSettings(hostname: String!): PublicGeneralSettings
   platformAuditLogs(page: Int): AuditLogPage!
   tenantAuditLogs(page: Int): AuditLogPage!
   categories(search: String): [Category!]!
@@ -712,6 +830,12 @@ type Mutation {
   createSubcategory(input: CreateSubcategoryInput!): Subcategory!
   updateSubcategory(id: ID!, input: UpdateSubcategoryInput!): Subcategory!
   deleteSubcategory(id: ID!): Boolean!
+  updateMyGeneralSettings(input: UpdateGeneralSettingsInput!): GeneralSettings!
+  updateMyWebsiteSettings(input: UpdateWebsiteSettingsInput!): WebsiteSettings!
+  updateMySocialLinks(input: [SaveSocialLinkInput!]!): [TenantSocialLink!]!
+  updateMySeoSettings(input: UpdateSeoSettingsInput!): SeoSettings!
+  updateMySeoImage(input: SeoImageInput!): String
+  updateMyContentSettings(input: UpdateContentSettingsInput!): ContentSettings!
   createTag(input: CreateTagInput!): Tag!
   updateTag(id: ID!, input: UpdateTagInput!): Tag!
   deleteTag(id: ID!): Boolean!

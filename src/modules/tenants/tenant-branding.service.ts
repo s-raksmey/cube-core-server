@@ -23,7 +23,7 @@ export function brandingAssetUrl(path: string | null) { return path ? `/storage/
 function map(row: { tenantUuid: string; managementLogoPath: string | null; websiteLogoPath: string | null; faviconPath: string | null; publicWebsiteFaviconPath: string | null; openGraphImagePath: string | null }) {
   return { tenantId: row.tenantUuid, managementLogoUrl: brandingAssetUrl(row.managementLogoPath), websiteLogoUrl: brandingAssetUrl(row.websiteLogoPath), faviconUrl: brandingAssetUrl(row.faviconPath), publicWebsiteFaviconUrl: brandingAssetUrl(row.publicWebsiteFaviconPath), openGraphImageUrl: brandingAssetUrl(row.openGraphImagePath) };
 }
-async function requireSubTenant(session: SessionPayload, tenantId: string, permission: "BRANDING_VIEW" | "BRANDING_UPDATE") {
+async function requireSubTenant(session: SessionPayload, tenantId: string, permission: "SETTINGS_VIEW" | "SETTINGS_UPDATE") {
   if (session.role === "SUPERADMIN") {
     if (session.audience !== "ADMIN_CONSOLE") throw forbidden("SuperAdmin console access is required");
   } else {
@@ -34,7 +34,7 @@ async function requireSubTenant(session: SessionPayload, tenantId: string, permi
   if (!tenant) throw validationError("Sub-tenant not found");
 }
 export async function getTenantBranding(session: SessionPayload, tenantId: string, own = false) {
-  await requireSubTenant(session, own ? session.tenantId : tenantId, "BRANDING_VIEW");
+  await requireSubTenant(session, own ? session.tenantId : tenantId, "SETTINGS_VIEW");
   const id = own ? session.tenantId : tenantId;
   const row = await prisma.tenantBranding.upsert({ where: { tenantUuid: id }, create: { tenantUuid: id }, update: {} });
   return map(row);
@@ -101,7 +101,7 @@ export async function getPublicMainTenantBranding() {
   return map(row);
 }
 
-async function saveBrandingAsset(
+export async function saveBrandingAsset(
   id: string,
   input: { asset: BrandingAsset; fileName: string; mimeType: string; contentBase64?: string | null },
 ) {
@@ -145,7 +145,7 @@ export async function updateMainTenantBranding(
 
 export async function updateTenantBranding(session: SessionPayload, tenantId: string, input: { asset: BrandingAsset; fileName: string; mimeType: string; contentBase64?: string | null }, own = false) {
   const id = own ? session.tenantId : tenantId;
-  await requireSubTenant(session, id, "BRANDING_UPDATE");
+  await requireSubTenant(session, id, "SETTINGS_UPDATE");
   const branding = await saveBrandingAsset(id, input);
   await writeAuthAudit({
     action: "tenant.branding.updated",

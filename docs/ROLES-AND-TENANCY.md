@@ -86,6 +86,11 @@ Password permissions. `EDITOR` starts with View and own-profile Edit permissions
 For analytics, `ADMIN` starts with `ANALYTICS_VIEW_TENANT` and `EDITOR` with
 `ANALYTICS_VIEW_OWN`. The service derives tenant and author scope from the
 authenticated session and the granted permission; see [ANALYTICS.md](./ANALYTICS.md).
+General, Website maintenance and branding, Social Links, SEO, and Content
+settings share `SETTINGS_VIEW` and `SETTINGS_UPDATE`. `ADMIN` starts with both;
+`EDITOR` starts with view access only.
+The tenant comes from the authenticated session; see
+[GENERAL-SETTINGS.md](./GENERAL-SETTINGS.md).
 `SUPERADMIN` remains a fixed Main Tenant role and is not configurable here.
 
 ## Activation lifecycle

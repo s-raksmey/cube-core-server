@@ -46,6 +46,8 @@ Avoid starting with many microservices. The risk is duplicated auth/tenant logic
 - Authentication / session issuance
 - Authorization (role + tenant guards)
 - Domain services: tenants, users, settings, audit
+
+Sub-tenant General settings use the existing tenant JSON settings field and are described in [GENERAL-SETTINGS.md](./GENERAL-SETTINGS.md).
 - Database access
 - Background-safe utility endpoints (health, webhooks later)
 

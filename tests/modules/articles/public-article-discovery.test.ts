@@ -9,7 +9,7 @@ vi.mock("@/src/lib/db", () => ({ prisma: {
   $transaction: mocks.transaction, $queryRaw: mocks.query,
 } }));
 
-import { publicWebsiteArticle, publicWebsiteArticles, publicWebsitePopularArticles, publicWebsiteRelatedArticles } from "@/src/modules/articles/public-article.service";
+import { mapPublicArticleSummary, publicWebsiteArticle, publicWebsiteArticles, publicWebsitePopularArticles, publicWebsiteRelatedArticles } from "@/src/modules/articles/public-article.service";
 
 const tenantId = randomUUID();
 const articleId = randomUUID();
@@ -19,7 +19,7 @@ const tagId = randomUUID();
 
 function summary(uuid: string, title: string) {
   return { uuid, title, slug: title.toLowerCase().replaceAll(" ", "-"), summary: null,
-    isBreaking: false, isFeatured: false, featuredImageUrl: null, publishedAt: new Date("2026-10-15T12:00:00Z"),
+    isBreaking: false, breakingExpiresAt: null, isFeatured: false, featuredImageUrl: null, publishedAt: new Date("2026-10-15T12:00:00Z"),
     viewCount: 7, shareCount: 3,
     category: { uuid: categoryId, slug: "news", name: "News", translations: [] },
     subcategory: { slug: "local", translations: [{ locale: "en", name: "Local" }] }, translations: [] };
@@ -31,6 +31,18 @@ beforeEach(() => {
 });
 
 describe("public article discovery", () => {
+  it("shows Breaking only before expiration and filters public Breaking reads by tenant and expiry", async () => {
+    const breaking = { ...summary(articleId, "Breaking News"), isBreaking: true,
+      breakingExpiresAt: new Date(Date.now() + 60_000) };
+    expect(mapPublicArticleSummary(breaking).isBreaking).toBe(true);
+    expect(mapPublicArticleSummary({ ...breaking, breakingExpiresAt: new Date(Date.now() - 1) }).isBreaking).toBe(false);
+    mocks.transaction.mockResolvedValue([[breaking], 1]);
+    await publicWebsiteArticles(tenantId, { breaking: true });
+    expect(mocks.findMany.mock.calls[0][0].where).toMatchObject({
+      tenantUuid: tenantId, status: ArticleStatus.PUBLISHED, isBreaking: true,
+      breakingExpiresAt: { gt: expect.any(Date) },
+    });
+  });
   it("keeps latest reads published, tenant-scoped, publication-ordered, and summary-only", async () => {
     mocks.transaction.mockResolvedValue([[summary(articleId, "Public News")], 1]);
     const page = await publicWebsiteArticles(tenantId, {});

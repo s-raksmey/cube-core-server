@@ -10,6 +10,7 @@ vi.mock("@/src/lib/db", () => ({
 import {
   findActiveTenantById,
   findActiveTenantByHostname,
+  findActiveWebsiteTenantUuidByHostname,
   findActiveTenantBySlug,
   hasDomainVerificationRecord,
   normalizeTenantHostname,
@@ -63,6 +64,17 @@ describe("normalizeTenantHostname", () => {
       findActiveTenantByHostname("https://tenant.example", TenantDomainPurpose.WEBSITE),
     ).resolves.toBeNull();
     expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("resolves only the website tenant key for public Settings", async () => {
+    findFirst.mockResolvedValue({ tenantUuid: "tenant-a" });
+    await expect(findActiveWebsiteTenantUuidByHostname(" SITE.EXAMPLE. ")).resolves.toBe("tenant-a");
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { hostname: "site.example", purpose: TenantDomainPurpose.WEBSITE,
+        status: TenantDomainStatus.ACTIVE,
+        tenant: { type: "SUB", status: "ACTIVE", deletedAt: null } },
+      select: { tenantUuid: true },
+    });
   });
 
   it("resolves only active sub-tenants by normalized slug and returns safe identity fields", async () => {

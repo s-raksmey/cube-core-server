@@ -1,4 +1,4 @@
-import { TenantType } from "@prisma/client";
+import { Prisma, TenantType } from "@prisma/client";
 import { z } from "zod";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { prisma } from "@/src/lib/db";
@@ -40,6 +40,21 @@ export async function listSubcategories(session: SessionPayload, categoryId?: st
 export async function getSubcategory(session: SessionPayload, id: string) { const tenantId = await requireTenant(session, "CATEGORY_VIEW_SUBCATEGORY"); const row = await prisma.subcategory.findFirst({ where: { uuid: id, tenantUuid: tenantId }, include: includeSubcategory }); return row ? mapSubcategory(row) : null; }
 export async function createSubcategory(session: SessionPayload, input: unknown) { const tenantId = await requireTenant(session, "CATEGORY_CREATE_SUBCATEGORY"); const data = parse(subcategoryInput, input); const parent = await prisma.category.findFirst({ where: { uuid: data.categoryId, tenantUuid: tenantId }, select: { uuid: true } }); if (!parent) throw notFound("Category not found"); try { return mapSubcategory(await prisma.subcategory.create({ data: { tenantUuid: tenantId, categoryUuid: data.categoryId, slug: data.slug, translations: { create: data.translations } }, include: includeSubcategory })); } catch { throw validationError("A subcategory with this slug already exists"); } }
 export async function updateSubcategory(session: SessionPayload, id: string, input: unknown) { const tenantId = await requireTenant(session, "CATEGORY_EDIT_SUBCATEGORY"); const data = parse(updateInput, input); const existing = await prisma.subcategory.findFirst({ where: { uuid: id, tenantUuid: tenantId }, select: { uuid: true } }); if (!existing) throw notFound("Subcategory not found"); try { return mapSubcategory(await prisma.subcategory.update({ where: { uuid: id }, data: { ...(data.slug ? { slug: data.slug } : {}), ...(data.translations ? { name: englishName(data.translations), translations: { deleteMany: {}, create: data.translations } } : {}) }, include: includeSubcategory })); } catch { throw validationError("A subcategory with this slug already exists"); } }
-export async function deleteSubcategory(session: SessionPayload, id: string) { const tenantId = await requireTenant(session, "CATEGORY_DELETE_SUBCATEGORY"); const row = await prisma.subcategory.findFirst({ where: { uuid: id, tenantUuid: tenantId }, select: { uuid: true } }); if (!row) throw notFound("Subcategory not found"); await prisma.subcategory.delete({ where: { uuid: id } }); return true; }
+export async function deleteSubcategory(session: SessionPayload, id: string) {
+  const tenantId = await requireTenant(session, "CATEGORY_DELETE_SUBCATEGORY");
+  const row = await prisma.subcategory.findFirst({
+    where: { uuid: id, tenantUuid: tenantId }, select: { uuid: true },
+  });
+  if (!row) throw notFound("Subcategory not found");
+  try {
+    await prisma.subcategory.delete({ where: { uuid: id } });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
+      throw validationError("Cannot delete a subcategory used by articles");
+    }
+    throw error;
+  }
+  return true;
+}
 
 

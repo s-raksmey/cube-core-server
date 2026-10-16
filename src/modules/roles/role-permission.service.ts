@@ -14,8 +14,8 @@ export const tenantUserPermissionCodes = [
   "USERS_SUSPEND",
   "USERS_RESET_PASSWORD",
   "USERS_DELETE",
-  "BRANDING_VIEW",
-  "BRANDING_UPDATE",
+  "SETTINGS_VIEW",
+  "SETTINGS_UPDATE",
   "CATEGORY_VIEW",
   "CATEGORY_VIEW_SUBCATEGORY",
   "TAG_VIEW",
@@ -39,11 +39,15 @@ export const articlePermissionCodes = tenantUserPermissionCodes.filter(
 
 export type TenantUserPermission = (typeof tenantUserPermissionCodes)[number];
 
+function isTenantUserPermission(permission: string): permission is TenantUserPermission {
+  return tenantUserPermissionCodes.includes(permission as TenantUserPermission);
+}
+
 /** Editor can manage user profiles and view the tenant settings, but cannot edit settings. */
 export const allowedEditorUserPermissions = [
   "USERS_VIEW",
   "USERS_EDIT",
-  "BRANDING_VIEW",
+  "SETTINGS_VIEW",
   "CATEGORY_VIEW",
   "CATEGORY_VIEW_SUBCATEGORY",
   "TAG_VIEW",
@@ -70,6 +74,9 @@ const updateRolePermissionsSchema = z.object({
   }
   if (value.permissions.some(permission => permission.startsWith("TAG_") && permission !== "TAG_VIEW") && !value.permissions.includes("TAG_VIEW")) {
     ctx.addIssue({ code: "custom", path: ["permissions"], message: "View tags is required for tag management permissions" });
+  }
+  if (value.permissions.includes("SETTINGS_UPDATE") && !value.permissions.includes("SETTINGS_VIEW")) {
+    ctx.addIssue({ code: "custom", path: ["permissions"], message: "View settings is required to update settings" });
   }
   if (value.permissions.some(permission => permission.startsWith("ARTICLE_") && permission !== "ARTICLE_VIEW") && !value.permissions.includes("ARTICLE_VIEW")) {
     ctx.addIssue({ code: "custom", path: ["permissions"], message: "View articles is required for article management permissions" });
@@ -112,10 +119,10 @@ export async function listTenantRolePermissions(session: SessionPayload) {
     where: { code: { in: ["SUPERADMIN", "ADMIN", "EDITOR"] } },
     select: { code: true, permissions: { select: { permission: true } } },
   });
-  const byCode = new Map(roles.map((role) => [role.code, role.permissions.map((entry) => entry.permission)]));
+  const byCode = new Map(roles.map((role) => [role.code, role.permissions.map((entry) => entry.permission).filter(isTenantUserPermission)]));
   return ["SUPERADMIN", "ADMIN", "EDITOR"].map((role) => ({
     role,
-    permissions: (byCode.get(role) ?? []) as TenantUserPermission[],
+    permissions: byCode.get(role) ?? [],
   }));
 }
 
@@ -125,10 +132,10 @@ export async function listTenantRolePermissionSummary(session: SessionPayload) {
     where: { code: { in: ["ADMIN", "EDITOR"] } },
     select: { code: true, permissions: { select: { permission: true } } },
   });
-  const byCode = new Map(roles.map((role) => [role.code, role.permissions.map((entry) => entry.permission)]));
+  const byCode = new Map(roles.map((role) => [role.code, role.permissions.map((entry) => entry.permission).filter(isTenantUserPermission)]));
   return ["ADMIN", "EDITOR"].map((role) => ({
     role,
-    permissions: (byCode.get(role) ?? []) as TenantUserPermission[],
+    permissions: byCode.get(role) ?? [],
   }));
 }
 
@@ -183,9 +190,7 @@ export async function getTenantUserPermissions(session: SessionPayload) {
     });
     return (role?.permissions ?? [])
       .map((entry) => entry.permission)
-      .filter((permission): permission is TenantUserPermission =>
-        tenantUserPermissionCodes.includes(permission as TenantUserPermission),
-      );
+      .filter(isTenantUserPermission);
   }
   const membership = await prisma.tenantMembership.findFirst({
     where: {
@@ -208,9 +213,7 @@ export async function getTenantUserPermissions(session: SessionPayload) {
   if (!membership) throw forbidden("You do not have access to this tenant");
   const permissions = membership.role.permissions
     .map((entry) => entry.permission)
-    .filter((permission): permission is TenantUserPermission =>
-      tenantUserPermissionCodes.includes(permission as TenantUserPermission),
-    );
+    .filter(isTenantUserPermission);
 
   return membership.role.code === "EDITOR"
     ? permissions.filter((permission) =>

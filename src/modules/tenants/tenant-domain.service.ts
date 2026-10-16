@@ -137,6 +137,19 @@ export async function findActiveTenantByHostname(
   return domain?.tenant ?? null;
 }
 
+/** Website Settings only needs the domain's tenant key, not the full branding/domain projection. */
+export async function findActiveWebsiteTenantUuidByHostname(hostname: string) {
+  const normalized = normalizeTenantHostname(hostname);
+  if (!normalized) return null;
+  const domain = await prisma.tenantDomain.findFirst({
+    where: { hostname: normalized, purpose: TenantDomainPurpose.WEBSITE,
+      status: TenantDomainStatus.ACTIVE,
+      tenant: { type: TenantType.SUB, status: TenantStatus.ACTIVE, deletedAt: null } },
+    select: { tenantUuid: true },
+  });
+  return domain?.tenantUuid ?? null;
+}
+
 /** Resolve a local/shared-app selection to public tenant identity; never treat it as authorization. */
 export async function findActiveTenantBySlug(slug: string) {
   const normalized = slug.trim().toLowerCase();

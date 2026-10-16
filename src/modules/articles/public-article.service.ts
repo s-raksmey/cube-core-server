@@ -29,7 +29,7 @@ const navigationCategorySelect = {
 
 export const publicArticleSummarySelect = {
   uuid: true, title: true, slug: true, summary: true,
-  isBreaking: true, isFeatured: true, featuredImageUrl: true, publishedAt: true, viewCount: true, shareCount: true,
+  isBreaking: true, breakingExpiresAt: true, isFeatured: true, featuredImageUrl: true, publishedAt: true, viewCount: true, shareCount: true,
   category: { select: categorySelect },
   subcategory: { select: { slug: true,
     translations: { select: { locale: true, name: true }, orderBy: { locale: "asc" } } } },
@@ -55,7 +55,8 @@ export function mapPublicArticleSummary(row: Summary) {
     category: { id: row.category.uuid, slug: row.category.slug, name: row.category.name, translations: row.category.translations },
     subcategorySlug: row.subcategory.slug,
     subcategory: row.subcategory,
-    isBreaking: row.isBreaking, isFeatured: row.isFeatured, viewCount: row.viewCount, shareCount: row.shareCount,
+    isBreaking: row.isBreaking && !!row.breakingExpiresAt && row.breakingExpiresAt > new Date(),
+    isFeatured: row.isFeatured, viewCount: row.viewCount, shareCount: row.shareCount,
     featuredImageUrl: row.featuredImageUrl, publishedAt: row.publishedAt!.toISOString(),
     translations: row.translations,
   };
@@ -117,7 +118,7 @@ export async function publicWebsiteArticles(tenantId: string, input: unknown) {
     ...(subcategorySlug ? { subcategory: { slug: subcategorySlug } } : {}),
     ...(tagSlug ? { tags: { some: { tag: { slug: tagSlug } } } } : {}),
     ...(featured === true ? { isFeatured: true } : {}),
-    ...(breaking === true ? { isBreaking: true } : {}),
+    ...(breaking === true ? { isBreaking: true, breakingExpiresAt: { gt: new Date() } } : {}),
     ...(search ? { OR: [
       { title: { contains: search, mode: "insensitive" } },
       { summary: { contains: search, mode: "insensitive" } },

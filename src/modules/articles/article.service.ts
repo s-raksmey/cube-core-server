@@ -10,6 +10,7 @@ import { assertArticleTransition, canEditArticleStatus, type ArticleAction } fro
 import { articleAuthorRoles, assertCanManageArticleAuthor } from "./article-role-access";
 import { articleImageUploadSchema, commentSchema, createArticleSchema, scheduleAtSchema, updateArticleSchema } from "./article-validation";
 import { removeArticleThumbnail, saveArticleContentImage, saveArticleThumbnail } from "./article-image.service";
+import { breakingExpiresAt } from "@/src/modules/tenants/tenant-content-settings.service";
 
 type PermissionSet = Set<TenantUserPermission>;
 
@@ -345,6 +346,7 @@ export async function articleWorkflow(session: SessionPayload, id: string, actio
   const data: Prisma.ArticleUpdateManyMutationInput = {
     status: nextStatus[action],
     ...(action === "publish" ? { publishedAt: now, publishedByUuid: session.userId, scheduledAt: null, scheduledByUuid: null } : {}),
+    ...(action === "unpublish" ? { breakingExpiresAt: null } : {}),
     ...(action === "schedule" || action === "reschedule" ? { scheduledAt, scheduledByUuid: session.userId } : {}),
     ...(action === "cancelSchedule" ? { scheduledAt: null, scheduledByUuid: null } : {}),
     ...(action === "archive" ? { archivedAt: now } : {}),
@@ -352,7 +354,13 @@ export async function articleWorkflow(session: SessionPayload, id: string, actio
   };
   try {
     await prisma.$transaction(async (tx) => {
+      if (action === "publish") {
+        const tenant = row.isBreaking
+          ? await tx.tenant.findUnique({ where: { uuid: tenantUuid }, select: { settings: true } }) : null;
+        data.breakingExpiresAt = row.isBreaking ? breakingExpiresAt(now, tenant?.settings ?? {}) : null;
+      }
       const changed = await tx.article.updateMany({ where: { uuid: row.uuid, tenantUuid, status: row.status,
+        ...(action === "publish" ? { isBreaking: row.isBreaking } : {}),
         ...(row.status === ArticleStatus.SCHEDULED ? { scheduledAt: row.scheduledAt } : {}) }, data });
       if (changed.count !== 1) throw validationError("Article changed while this action was in progress. Refresh and try again");
       if (action === "submit" || action === "requestChanges" || ((action === "publish" || action === "schedule") && row.status === ArticleStatus.IN_REVIEW)) {
@@ -387,7 +395,8 @@ export async function setArticlePresentation(session: SessionPayload, id: string
   await assertCanManageArticleAuthor(session, row.createdByUuid);
   const field = kind === "breaking" ? "isBreaking" : "isFeatured";
   await prisma.$transaction(async (tx) => {
-    const changed = await tx.article.updateMany({ where: { uuid: row.uuid, tenantUuid, status: row.status }, data: { [field]: enabled } });
+    const changed = await tx.article.updateMany({ where: { uuid: row.uuid, tenantUuid, status: row.status },
+      data: { [field]: enabled, ...(kind === "breaking" && !enabled ? { breakingExpiresAt: null } : {}) } });
     if (changed.count !== 1) throw validationError("Article changed while this action was in progress. Refresh and try again");
     await writeAuthAudit({ action: `ARTICLE_${kind.toUpperCase()}_${enabled ? "ENABLED" : "DISABLED"}`,
       actorUserUuid: session.userId, tenantUuid, targetType: "article", targetUuid: row.uuid,

@@ -21,15 +21,15 @@ const DEFAULT_ADMIN_USER_PERMISSIONS = [
   "USERS_ACTIVATE",
   "USERS_SUSPEND",
   "USERS_RESET_PASSWORD",
-  "BRANDING_VIEW",
-  "BRANDING_UPDATE",
+  "SETTINGS_VIEW",
+  "SETTINGS_UPDATE",
   "ANALYTICS_VIEW_TENANT",
 ] as const;
 
 const DEFAULT_EDITOR_USER_PERMISSIONS = [
   "USERS_VIEW",
   "USERS_EDIT",
-  "BRANDING_VIEW",
+  "SETTINGS_VIEW",
   "ANALYTICS_VIEW_OWN",
 ] as const;
 
@@ -92,6 +92,10 @@ async function ensureRoles() {
       data: DEFAULT_ADMIN_CATEGORY_PERMISSIONS.map((permission) => ({ roleUuid, permission })),
       skipDuplicates: true,
     });
+    await prisma.rolePermission.createMany({
+      data: DEFAULT_ADMIN_USER_PERMISSIONS.filter((permission) => permission.startsWith("SETTINGS_")).map((permission) => ({ roleUuid, permission })),
+      skipDuplicates: true,
+    });
   }
 
   const editorPermissionCount = await prisma.rolePermission.count({
@@ -107,6 +111,10 @@ async function ensureRoles() {
   }
   await prisma.rolePermission.createMany({
     data: DEFAULT_EDITOR_CATEGORY_PERMISSIONS.map((permission) => ({ roleUuid: ROLE_IDS.EDITOR, permission })),
+    skipDuplicates: true,
+  });
+  await prisma.rolePermission.createMany({
+    data: DEFAULT_EDITOR_USER_PERMISSIONS.filter((permission) => permission.startsWith("SETTINGS_")).map((permission) => ({ roleUuid: ROLE_IDS.EDITOR, permission })),
     skipDuplicates: true,
   });
 }

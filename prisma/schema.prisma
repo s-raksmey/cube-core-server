@@ -53,32 +53,43 @@ enum AuthChallengeType {
   RECOVERY
 }
 
+enum SocialPlatform {
+  FACEBOOK
+  TELEGRAM
+  YOUTUBE
+  TIKTOK
+  INSTAGRAM
+  X
+  LINKEDIN
+}
+
 model Tenant {
-  uuid             String               @id @default(uuid()) @map("uuid")
-  name             String
-  slug             String               @unique
-  type             TenantType
-  parentTenantUuid String?              @map("parent_tenant_uuid")
-  parentTenant     Tenant?              @relation("TenantHierarchy", fields: [parentTenantUuid], references: [uuid])
-  childTenants     Tenant[]             @relation("TenantHierarchy")
-  domains          TenantDomain[]
+  uuid                       String                  @id @default(uuid()) @map("uuid")
+  name                       String
+  slug                       String                  @unique
+  type                       TenantType
+  parentTenantUuid           String?                 @map("parent_tenant_uuid")
+  parentTenant               Tenant?                 @relation("TenantHierarchy", fields: [parentTenantUuid], references: [uuid])
+  childTenants               Tenant[]                @relation("TenantHierarchy")
+  domains                    TenantDomain[]
   localDevelopmentAssignment LocalDevelopmentTenant?
-  status           TenantStatus         @default(ACTIVE)
-  settings         Json                 @default("{}")
-  branding         TenantBranding?
-  memberships      TenantMembership[]
-  sessions         UserSession[]
-  challenges       AuthLoginChallenge[]
-  auditLogs        AuditLog[]
-  categories       Category[]
-  subcategories    Subcategory[]
-  tags             Tag[]
-  articles         Article[]
-  articleViews     ArticleView[]
-  articleShares    ArticleShare[]
-  createdAt        DateTime             @default(now()) @map("created_at")
-  updatedAt        DateTime             @updatedAt @map("updated_at")
-  deletedAt        DateTime?            @map("deleted_at")
+  status                     TenantStatus            @default(ACTIVE)
+  settings                   Json                    @default("{}")
+  branding                   TenantBranding?
+  socialLinks                TenantSocialLink[]
+  memberships                TenantMembership[]
+  sessions                   UserSession[]
+  challenges                 AuthLoginChallenge[]
+  auditLogs                  AuditLog[]
+  categories                 Category[]
+  subcategories              Subcategory[]
+  tags                       Tag[]
+  articles                   Article[]
+  articleViews               ArticleView[]
+  articleShares              ArticleShare[]
+  createdAt                  DateTime                @default(now()) @map("created_at")
+  updatedAt                  DateTime                @updatedAt @map("updated_at")
+  deletedAt                  DateTime?               @map("deleted_at")
 
   @@index([parentTenantUuid])
   @@index([type, status])
@@ -86,16 +97,16 @@ model Tenant {
 }
 
 model Category {
-  uuid         String                @id @default(uuid()) @map("uuid")
-  tenantUuid   String                @map("tenant_uuid")
-  tenant       Tenant                @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
-  slug         String
-  name         String
-  translations CategoryTranslation[]
+  uuid          String                @id @default(uuid()) @map("uuid")
+  tenantUuid    String                @map("tenant_uuid")
+  tenant        Tenant                @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  slug          String
+  name          String
+  translations  CategoryTranslation[]
   subcategories Subcategory[]
-  articles     Article[]
-  createdAt    DateTime              @default(now()) @map("created_at")
-  updatedAt    DateTime              @updatedAt @map("updated_at")
+  articles      Article[]
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
 
   @@unique([tenantUuid, slug])
   @@unique([uuid, tenantUuid])
@@ -104,13 +115,13 @@ model Category {
 }
 
 model CategoryTranslation {
-  uuid       String   @id @default(uuid()) @map("uuid")
-  categoryUuid String @map("category_uuid")
-  category   Category @relation(fields: [categoryUuid], references: [uuid], onDelete: Cascade)
-  locale     String
-  name       String
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  uuid         String   @id @default(uuid()) @map("uuid")
+  categoryUuid String   @map("category_uuid")
+  category     Category @relation(fields: [categoryUuid], references: [uuid], onDelete: Cascade)
+  locale       String
+  name         String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@unique([categoryUuid, locale])
   @@index([locale])
@@ -136,13 +147,13 @@ model Subcategory {
 }
 
 model SubcategoryTranslation {
-  uuid          String      @id @default(uuid()) @map("uuid")
-  subcategoryUuid String    @map("subcategory_uuid")
-  subcategory    Subcategory @relation(fields: [subcategoryUuid], references: [uuid], onDelete: Cascade)
-  locale         String
-  name           String
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
+  uuid            String      @id @default(uuid()) @map("uuid")
+  subcategoryUuid String      @map("subcategory_uuid")
+  subcategory     Subcategory @relation(fields: [subcategoryUuid], references: [uuid], onDelete: Cascade)
+  locale          String
+  name            String
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
 
   @@unique([subcategoryUuid, locale])
   @@index([locale])
@@ -150,30 +161,46 @@ model SubcategoryTranslation {
 }
 
 model TenantBranding {
-  tenantUuid          String   @id @map("tenant_uuid")
-  tenant              Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
-  managementLogoPath  String?  @map("management_logo_path")
-  websiteLogoPath     String?  @map("website_logo_path")
-  faviconPath         String?  @map("favicon_path")
-  publicWebsiteFaviconPath String? @map("public_website_favicon_path")
-  openGraphImagePath  String?  @map("open_graph_image_path")
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  tenantUuid               String   @id @map("tenant_uuid")
+  tenant                   Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  managementLogoPath       String?  @map("management_logo_path")
+  websiteLogoPath          String?  @map("website_logo_path")
+  faviconPath              String?  @map("favicon_path")
+  publicWebsiteFaviconPath String?  @map("public_website_favicon_path")
+  openGraphImagePath       String?  @map("open_graph_image_path")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   @@map("tenant_branding")
 }
 
+model TenantSocialLink {
+  uuid       String         @id @default(uuid()) @map("uuid")
+  tenantUuid String         @map("tenant_uuid")
+  tenant     Tenant         @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  platform   SocialPlatform
+  url        String
+  enabled    Boolean        @default(true)
+  sortOrder  Int            @default(0) @map("sort_order")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+
+  @@unique([tenantUuid, platform])
+  @@index([tenantUuid, enabled, sortOrder])
+  @@map("tenant_social_links")
+}
+
 model TenantDomain {
-  uuid              String             @id @default(uuid()) @map("uuid")
-  tenantUuid        String             @map("tenant_uuid")
-  tenant            Tenant             @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  uuid              String              @id @default(uuid()) @map("uuid")
+  tenantUuid        String              @map("tenant_uuid")
+  tenant            Tenant              @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
   purpose           TenantDomainPurpose
-  hostname          String?            @unique
-  status            TenantDomainStatus @default(PENDING_VERIFICATION)
-  verifiedAt        DateTime?          @map("verified_at")
-  verificationToken String?            @map("verification_token")
-  createdAt         DateTime           @default(now()) @map("created_at")
-  updatedAt         DateTime           @updatedAt @map("updated_at")
+  hostname          String?             @unique
+  status            TenantDomainStatus  @default(PENDING_VERIFICATION)
+  verifiedAt        DateTime?           @map("verified_at")
+  verificationToken String?             @map("verification_token")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
 
   @@unique([tenantUuid, purpose])
   @@map("tenant_domains")
@@ -182,11 +209,11 @@ model TenantDomain {
 /// The single local routing selection. This is intentionally separate from
 /// verified production domain mappings and is only used by local development.
 model LocalDevelopmentTenant {
-  hostname  String   @id
-  tenantUuid String  @unique @map("tenant_uuid")
-  tenant    Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  hostname   String   @id
+  tenantUuid String   @unique @map("tenant_uuid")
+  tenant     Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@map("local_development_tenants")
 }
@@ -249,10 +276,10 @@ model User {
   createdActivationTokens UserActivationToken[]    @relation("ActivationCreatedBy")
   createdResetTokens      UserPasswordResetToken[] @relation("ResetCreatedBy")
   createdMemberships      TenantMembership[]       @relation("MembershipCreatedBy")
-  authoredArticles         Article[]                @relation("ArticleAuthor")
-  publishedArticles        Article[]                @relation("ArticlePublisher")
-  scheduledArticles        Article[]                @relation("ArticleScheduler")
-  articleReviews           ArticleReview[]
+  authoredArticles        Article[]                @relation("ArticleAuthor")
+  publishedArticles       Article[]                @relation("ArticlePublisher")
+  scheduledArticles       Article[]                @relation("ArticleScheduler")
+  articleReviews          ArticleReview[]
 
   @@index([status])
   @@map("users")
@@ -297,17 +324,17 @@ model UserActivationToken {
 }
 
 model UserPasswordResetToken {
-  uuid          String    @id @default(uuid()) @map("uuid")
-  userUuid      String    @map("user_uuid")
-  user          User      @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
-  tokenHash     String    @unique @map("token_hash")
-  encryptedToken String?  @map("encrypted_token")
-  expiresAt     DateTime  @map("expires_at")
-  usedAt        DateTime? @map("used_at")
-  revokedAt     DateTime? @map("revoked_at")
-  createdByUuid String?   @map("created_by")
-  createdBy     User?     @relation("ResetCreatedBy", fields: [createdByUuid], references: [uuid], onDelete: SetNull)
-  createdAt     DateTime  @default(now()) @map("created_at")
+  uuid           String    @id @default(uuid()) @map("uuid")
+  userUuid       String    @map("user_uuid")
+  user           User      @relation(fields: [userUuid], references: [uuid], onDelete: Cascade)
+  tokenHash      String    @unique @map("token_hash")
+  encryptedToken String?   @map("encrypted_token")
+  expiresAt      DateTime  @map("expires_at")
+  usedAt         DateTime? @map("used_at")
+  revokedAt      DateTime? @map("revoked_at")
+  createdByUuid  String?   @map("created_by")
+  createdBy      User?     @relation("ResetCreatedBy", fields: [createdByUuid], references: [uuid], onDelete: SetNull)
+  createdAt      DateTime  @default(now()) @map("created_at")
 
   @@index([userUuid])
   @@index([expiresAt])
@@ -441,6 +468,7 @@ model TagTranslation {
   @@index([locale])
   @@map("tag_translations")
 }
+
 enum ArticleStatus {
   DRAFT
   IN_REVIEW
@@ -456,44 +484,46 @@ enum ArticleReviewDecision {
 }
 
 model Article {
-  uuid             String               @id @default(uuid()) @map("uuid")
-  tenantUuid       String               @map("tenant_uuid")
-  tenant           Tenant               @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
-  createdByUuid    String?              @map("created_by_uuid")
-  createdBy        User?                @relation("ArticleAuthor", fields: [createdByUuid], references: [uuid], onDelete: SetNull)
-  publishedByUuid  String?              @map("published_by_uuid")
-  publishedBy      User?                @relation("ArticlePublisher", fields: [publishedByUuid], references: [uuid], onDelete: SetNull)
-  scheduledByUuid  String?              @map("scheduled_by_uuid")
-  scheduledBy      User?                @relation("ArticleScheduler", fields: [scheduledByUuid], references: [uuid], onDelete: SetNull)
-  title            String
-  slug             String
-  summary          String?
-  content          String               @default("")
-  categoryUuid     String               @map("category_uuid")
-  category         Category             @relation(fields: [categoryUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Restrict)
-  subcategoryUuid  String               @map("subcategory_uuid")
-  subcategory      Subcategory          @relation(fields: [subcategoryUuid, tenantUuid, categoryUuid], references: [uuid, tenantUuid, categoryUuid], onDelete: Restrict)
-  status           ArticleStatus        @default(DRAFT)
-  isBreaking       Boolean              @default(false) @map("is_breaking")
-  isFeatured       Boolean              @default(false) @map("is_featured")
-  featuredImageUrl String?              @map("featured_image_url")
-  scheduledAt      DateTime?            @map("scheduled_at")
-  publishedAt      DateTime?            @map("published_at")
-  archivedAt       DateTime?            @map("archived_at")
-  tags             ArticleTag[]
-  translations     ArticleTranslation[]
-  reviews          ArticleReview[]
-  views            ArticleView[]
-  viewCount        Int                  @default(0) @map("view_count")
-  shares           ArticleShare[]
-  shareCount       Int                  @default(0) @map("share_count")
-  createdAt        DateTime             @default(now()) @map("created_at")
-  updatedAt        DateTime             @updatedAt @map("updated_at")
+  uuid              String               @id @default(uuid()) @map("uuid")
+  tenantUuid        String               @map("tenant_uuid")
+  tenant            Tenant               @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  createdByUuid     String?              @map("created_by_uuid")
+  createdBy         User?                @relation("ArticleAuthor", fields: [createdByUuid], references: [uuid], onDelete: SetNull)
+  publishedByUuid   String?              @map("published_by_uuid")
+  publishedBy       User?                @relation("ArticlePublisher", fields: [publishedByUuid], references: [uuid], onDelete: SetNull)
+  scheduledByUuid   String?              @map("scheduled_by_uuid")
+  scheduledBy       User?                @relation("ArticleScheduler", fields: [scheduledByUuid], references: [uuid], onDelete: SetNull)
+  title             String
+  slug              String
+  summary           String?
+  content           String               @default("")
+  categoryUuid      String               @map("category_uuid")
+  category          Category             @relation(fields: [categoryUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Restrict)
+  subcategoryUuid   String               @map("subcategory_uuid")
+  subcategory       Subcategory          @relation(fields: [subcategoryUuid, tenantUuid, categoryUuid], references: [uuid, tenantUuid, categoryUuid], onDelete: Restrict)
+  status            ArticleStatus        @default(DRAFT)
+  isBreaking        Boolean              @default(false) @map("is_breaking")
+  breakingExpiresAt DateTime?            @map("breaking_expires_at")
+  isFeatured        Boolean              @default(false) @map("is_featured")
+  featuredImageUrl  String?              @map("featured_image_url")
+  scheduledAt       DateTime?            @map("scheduled_at")
+  publishedAt       DateTime?            @map("published_at")
+  archivedAt        DateTime?            @map("archived_at")
+  tags              ArticleTag[]
+  translations      ArticleTranslation[]
+  reviews           ArticleReview[]
+  views             ArticleView[]
+  viewCount         Int                  @default(0) @map("view_count")
+  shares            ArticleShare[]
+  shareCount        Int                  @default(0) @map("share_count")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
 
   @@unique([uuid, tenantUuid])
   @@unique([tenantUuid, slug])
   @@index([tenantUuid, status, updatedAt])
   @@index([tenantUuid, status, publishedAt])
+  @@index([tenantUuid, status, isBreaking, breakingExpiresAt])
   @@index([status, scheduledAt])
   @@index([tenantUuid, createdByUuid])
   @@index([tenantUuid, createdByUuid, publishedAt])
@@ -545,14 +575,14 @@ model ArticleTag {
 }
 
 model ArticleView {
-  uuid         String   @id @default(uuid()) @map("uuid")
-  tenantUuid   String   @map("tenant_uuid")
-  tenant       Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
-  articleUuid  String   @map("article_uuid")
-  article      Article  @relation(fields: [articleUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
-  visitorKey   String   @map("visitor_key")
-  bucketStart  DateTime @map("bucket_start")
-  viewedAt     DateTime @default(now()) @map("viewed_at")
+  uuid        String   @id @default(uuid()) @map("uuid")
+  tenantUuid  String   @map("tenant_uuid")
+  tenant      Tenant   @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  articleUuid String   @map("article_uuid")
+  article     Article  @relation(fields: [articleUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
+  visitorKey  String   @map("visitor_key")
+  bucketStart DateTime @map("bucket_start")
+  viewedAt    DateTime @default(now()) @map("viewed_at")
 
   @@unique([articleUuid, visitorKey, bucketStart])
   @@index([articleUuid, viewedAt])
@@ -568,15 +598,15 @@ enum ArticleSharePlatform {
 }
 
 model ArticleShare {
-  uuid         String               @id @default(uuid()) @map("uuid")
-  tenantUuid   String               @map("tenant_uuid")
-  tenant       Tenant               @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
-  articleUuid  String               @map("article_uuid")
-  article      Article              @relation(fields: [articleUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
-  platform     ArticleSharePlatform
-  visitorKey   String               @map("visitor_key")
-  bucketStart  DateTime             @map("bucket_start")
-  sharedAt     DateTime             @default(now()) @map("shared_at")
+  uuid        String               @id @default(uuid()) @map("uuid")
+  tenantUuid  String               @map("tenant_uuid")
+  tenant      Tenant               @relation(fields: [tenantUuid], references: [uuid], onDelete: Cascade)
+  articleUuid String               @map("article_uuid")
+  article     Article              @relation(fields: [articleUuid, tenantUuid], references: [uuid, tenantUuid], onDelete: Cascade)
+  platform    ArticleSharePlatform
+  visitorKey  String               @map("visitor_key")
+  bucketStart DateTime             @map("bucket_start")
+  sharedAt    DateTime             @default(now()) @map("shared_at")
 
   @@unique([articleUuid, visitorKey, platform, bucketStart], map: "article_shares_dedup_key")
   @@index([articleUuid, sharedAt])
