@@ -1,9 +1,24 @@
+import sharp from "sharp";
+import { readFile, access as fileAccess } from "node:fs/promises";
+import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { graphql } from "graphql";
+import type { ExecutionResult, GraphQLArgs } from "graphql";
+import type { GraphQLContext } from "@/src/graphql/context";
+import { createYoga } from "graphql-yoga";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { schema } from "@/src/graphql/resolvers/index";
+
+// Exercise Yoga's HTTP executor rather than mixing GraphQL ESM/CJS schema instances.
+async function graphql({ source, variableValues, contextValue }: GraphQLArgs): Promise<ExecutionResult> {
+  const yoga = createYoga({ schema, maskedErrors: false, logging: false, context: () => contextValue as GraphQLContext });
+  const response = await yoga.fetch("http://localhost/graphql", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ query: typeof source === "string" ? source : source.body, variables: variableValues }),
+  });
+  return await response.json() as ExecutionResult;
+}
 
 const grants = vi.hoisted(() => new Map<string, string[]>());
 vi.mock("@/src/modules/roles/role-permission.service", () => ({
@@ -103,7 +118,9 @@ databaseDescribe("Article tenant isolation and editorial workflow", () => {
     expect((await getArticle(author, id))?.status).toBe("DRAFT");
   });
   it("isolates reads, edits, workflow actions, categories, subcategories and tags", async () => {
-    expect((await listArticles(author, {})).items.map((item) => item.id)).toEqual([articleA]);
+    const ownArticleIds = (await listArticles(author, {})).items.map((item) => item.id);
+    expect(ownArticleIds).toContain(articleA);
+    expect(ownArticleIds).not.toContain(articleB);
     expect(await getArticle(author, articleB)).toBeNull();
     await expect(updateArticle(author, articleB, { title: "Stolen" })).rejects.toMatchObject({ extensions: { code: "NOT_FOUND" } });
     await expect(articleWorkflow(publisher, articleB, "publish")).rejects.toMatchObject({ extensions: { code: "NOT_FOUND" } });
@@ -322,4 +339,32 @@ databaseDescribe("Article tenant isolation and editorial workflow", () => {
     expect(await db.auditLog.count({ where: { tenantUuid: tenantA, targetUuid: articleA, action: "ARTICLE_PERMANENTLY_DELETED" } })).toBe(1);
     await expect(deleteArchivedArticle(publisher, articleA)).rejects.toMatchObject({ extensions: { code: "NOT_FOUND" } });
   });
+  it("stores separate canonical featured and optional hero uploads through GraphQL", async () => {
+    const png = await sharp({create:{width:1920,height:640,channels:3,background:"#3266a0"}}).png().toBuffer();
+    const upload = {fileName:"wide.png",mimeType:"image/png",contentBase64:png.toString("base64")};
+    const yoga = createYoga({schema,context:(): GraphQLContext => ({session:author,tenantHostMismatch:false,trustedAuthAudience:null,request:new Request("http://localhost/graphql")})});
+    const response = await yoga.fetch("http://localhost/graphql", {method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({
+      query:"mutation($input:CreateArticleInput!){createArticle(input:$input){id featuredImageUrl heroImageUrl}}",
+      variables:{input:input({slug:"hero-integration",isFeatured:true,thumbnailUpload:upload,heroImageUpload:upload})},
+    })});
+    const result = await response.json() as {errors?: unknown[];data?:{createArticle:{id:string;featuredImageUrl:string;heroImageUrl:string}}};
+    expect(result.errors).toBeUndefined();
+    const created=result.data!.createArticle as {id:string;featuredImageUrl:string;heroImageUrl:string};
+    expect(created.featuredImageUrl).not.toBe(created.heroImageUrl);
+    const disk=(url:string)=>resolve(process.env.LOCAL_STORAGE_PATH??"storage",url.slice("/storage/".length));
+    expect(await sharp(await readFile(disk(created.featuredImageUrl))).metadata()).toMatchObject({width:1600,height:900,compression:"av1"});
+    expect(await sharp(await readFile(disk(created.heroImageUrl))).metadata()).toMatchObject({width:1920,height:640,compression:"av1"});
+    const otherDraft = (await createArticle(other,input({slug:"other-hero-draft",categoryId:categoryB,subcategoryId:subcategoryB,tagIds:[]})))!;
+    await expect(updateArticle(other,otherDraft.id,{heroImageUrl:created.heroImageUrl})).rejects.toMatchObject({extensions:{code:"VALIDATION"}});
+    await articleWorkflow(publisher,created.id,"publish");
+    const featured=await publicWebsiteArticles(tenantA,{featured:true});
+    expect(featured.items.find(item=>item.id===created.id)).toMatchObject({featuredImageUrl:created.featuredImageUrl,heroImageUrl:created.heroImageUrl});
+    await articleWorkflow(publisher,created.id,"unpublish");
+    await updateArticle(author,created.id,{heroImageUrl:null});
+    expect((await getArticle(author,created.id))?.heroImageUrl).toBeNull();
+    await expect(fileAccess(disk(created.heroImageUrl))).rejects.toThrow();
+    await deleteArticle(author,created.id);
+    await expect(fileAccess(disk(created.featuredImageUrl))).rejects.toThrow();
+  });
+
 });

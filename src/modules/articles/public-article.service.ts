@@ -49,7 +49,7 @@ const detailSelect = {
 type Summary = Prisma.ArticleGetPayload<{ select: typeof publicArticleSummarySelect }>;
 type Detail = Prisma.ArticleGetPayload<{ select: typeof detailSelect }>;
 
-export function mapPublicArticleSummary(row: Summary) {
+export function mapPublicArticleSummary(row: Summary & { heroImageUrl?: string | null }) {
   return {
     id: row.uuid, title: row.title, slug: row.slug, summary: row.summary,
     category: { id: row.category.uuid, slug: row.category.slug, name: row.category.name, translations: row.category.translations },
@@ -57,7 +57,7 @@ export function mapPublicArticleSummary(row: Summary) {
     subcategory: row.subcategory,
     isBreaking: row.isBreaking && !!row.breakingExpiresAt && row.breakingExpiresAt > new Date(),
     isFeatured: row.isFeatured, viewCount: row.viewCount, shareCount: row.shareCount,
-    featuredImageUrl: row.featuredImageUrl, publishedAt: row.publishedAt!.toISOString(),
+    featuredImageUrl: row.featuredImageUrl, heroImageUrl: row.heroImageUrl ?? null, publishedAt: row.publishedAt!.toISOString(),
     translations: row.translations,
   };
 }
@@ -126,7 +126,7 @@ export async function publicWebsiteArticles(tenantId: string, input: unknown) {
     ] } : {}),
   };
   const [items, total] = await prisma.$transaction([
-    prisma.article.findMany({ where, select: publicArticleSummarySelect,
+    prisma.article.findMany({ where, select: { ...publicArticleSummarySelect, ...(featured === true ? { heroImageUrl: true } : {}) },
       orderBy: [{ publishedAt: "desc" }, { uuid: "desc" }], skip: (page - 1) * pageSize, take: pageSize }),
     prisma.article.count({ where }),
   ]);

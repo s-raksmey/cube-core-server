@@ -31,6 +31,19 @@ beforeEach(() => {
 });
 
 describe("public article discovery", () => {
+  it("projects the optional hero only for Featured reads and preserves the featured URL", async () => {
+    const item = { ...summary(articleId, "Featured News"), isFeatured: true,
+      featuredImageUrl: "/storage/featured.avif", heroImageUrl: "/storage/hero.avif" };
+    mocks.transaction.mockResolvedValue([[item], 1]);
+    const featured = await publicWebsiteArticles(tenantId, { featured: true });
+    expect(featured.items[0]).toMatchObject({ featuredImageUrl: item.featuredImageUrl, heroImageUrl: item.heroImageUrl });
+    expect(mocks.findMany.mock.calls[0][0].select.heroImageUrl).toBe(true);
+    expect(mocks.findMany.mock.calls[0][0].where.tenantUuid).toBe(tenantId);
+    mocks.findMany.mockClear();
+    await publicWebsiteArticles(tenantId, {});
+    expect(mocks.findMany.mock.calls[0][0].select.heroImageUrl).toBeUndefined();
+    expect(mapPublicArticleSummary(summary(articleId, "Legacy")).heroImageUrl).toBeNull();
+  });
   it("shows Breaking only before expiration and filters public Breaking reads by tenant and expiry", async () => {
     const breaking = { ...summary(articleId, "Breaking News"), isBreaking: true,
       breakingExpiresAt: new Date(Date.now() + 60_000) };

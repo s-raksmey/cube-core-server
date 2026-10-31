@@ -506,6 +506,7 @@ model Article {
   breakingExpiresAt DateTime?            @map("breaking_expires_at")
   isFeatured        Boolean              @default(false) @map("is_featured")
   featuredImageUrl  String?              @map("featured_image_url")
+  heroImageUrl      String?              @map("hero_image_url")
   scheduledAt       DateTime?            @map("scheduled_at")
   publishedAt       DateTime?            @map("published_at")
   archivedAt        DateTime?            @map("archived_at")

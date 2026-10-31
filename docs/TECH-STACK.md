@@ -130,3 +130,5 @@ Do **not** install or introduce these as alternatives:
 - No `any` in auth/tenancy code without justification
 - Authz tests for the SuperAdmin / Admin / Editor permission matrix
 - Migration creates singleton main tenant `core-super-admin`; seed creates SuperAdmin only
+
+Article upload image processing uses Sharp (libvips) for server-controlled AVIF encoding; see ARTICLE-WORKFLOW.md.

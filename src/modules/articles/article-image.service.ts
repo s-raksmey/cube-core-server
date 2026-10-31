@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { validationError } from "@/src/lib/errors";
+import { optimizeArticleImage } from "./article-image-optimization.service";
+import { ARTICLE_IMAGE_POLICY, type ArticleImagePreset } from "./article-image.config";
 
 export type ArticleImageUpload = {
   fileName: string;
@@ -10,7 +12,7 @@ export type ArticleImageUpload = {
 };
 
 const storageRoot = resolve(process.env.LOCAL_STORAGE_PATH ?? join(process.cwd(), "storage"));
-const maxBytes = 1000 * 1024;
+const maxBytes = ARTICLE_IMAGE_POLICY.maxInputBytes;
 const formats: Record<string, { extensions: string[]; extension: string; matches: (bytes: Buffer) => boolean }> = {
   "image/png": {
     extensions: [".png"], extension: ".png",
@@ -33,18 +35,19 @@ export function decodeArticleImage(upload: ArticleImageUpload) {
   }
   if (!upload.contentBase64 || upload.contentBase64.length > Math.ceil(maxBytes * 4 / 3) + 4 ||
     upload.contentBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(upload.contentBase64)) {
-    throw validationError("Image must be 1000 KB or smaller");
+    throw validationError("Image must be 3000 KB or smaller");
   }
   const bytes = Buffer.from(upload.contentBase64, "base64");
   if (!bytes.length || bytes.length > maxBytes || !format.matches(bytes)) {
-    throw validationError("Image content does not match its image type or exceeds 1000 KB");
+    throw validationError("Image content does not match its image type or exceeds 3000 KB");
   }
   return { bytes, extension: format.extension };
 }
 
-async function saveImage(upload: ArticleImageUpload, ...folders: string[]) {
-  const { bytes, extension } = decodeArticleImage(upload);
-  const relative = join(...folders, `${randomUUID()}${extension}`);
+async function saveImage(upload: ArticleImageUpload, preset: ArticleImagePreset, ...folders: string[]) {
+  const decoded = decodeArticleImage(upload);
+  const { bytes } = await optimizeArticleImage(decoded.bytes, preset);
+  const relative = join(...folders, `${randomUUID()}.avif`);
   const destination = resolve(storageRoot, relative);
   try {
     await mkdir(resolve(destination, ".."), { recursive: true });
@@ -57,15 +60,19 @@ async function saveImage(upload: ArticleImageUpload, ...folders: string[]) {
 }
 
 export async function saveArticleThumbnail(tenantId: string, articleId: string, upload: ArticleImageUpload) {
-  return saveImage(upload, "tenants", tenantId, "articles", articleId);
+  return saveImage(upload, "ARTICLE_FEATURED", "tenants", tenantId, "articles", articleId);
 }
 
 export async function saveArticleContentImage(tenantId: string, upload: ArticleImageUpload) {
-  return saveImage(upload, "tenants", tenantId, "article-content");
+  return saveImage(upload, "ARTICLE_FEATURED", "tenants", tenantId, "article-content");
 }
 
 export async function removeArticleThumbnail(tenantId: string, articleId: string, url: string | null | undefined) {
   const prefix = `/storage/tenants/${tenantId}/articles/${articleId}/`;
-  if (!url?.startsWith(prefix) || !/^[0-9a-f-]{36}\.(?:png|jpg|webp)$/.test(url.slice(prefix.length))) return;
+  if (!url?.startsWith(prefix) || !/^[0-9a-f-]{36}\.(?:png|jpg|webp|avif)$/.test(url.slice(prefix.length))) return;
   await rm(resolve(storageRoot, url.slice("/storage/".length)), { force: true });
+}
+
+export async function saveArticleHero(tenantId: string, articleId: string, upload: ArticleImageUpload) {
+  return saveImage(upload, "ARTICLE_HERO", "tenants", tenantId, "articles", articleId);
 }

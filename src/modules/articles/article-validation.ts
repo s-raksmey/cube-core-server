@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ARTICLE_IMAGE_POLICY } from "./article-image.config";
 
 const slug = z.string().trim().toLowerCase().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const markdown = z.string().max(100_000).refine(
@@ -12,7 +13,7 @@ const featuredImageUrl = z.string().trim().max(2048).refine(
 export const articleImageUploadSchema = z.object({
   fileName: z.string().trim().min(1).max(255),
   mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
-  contentBase64: z.string().min(1).max(Math.ceil((1000 * 1024) / 3) * 4),
+  contentBase64: z.string().min(1).max(Math.ceil(ARTICLE_IMAGE_POLICY.maxInputBytes / 3) * 4),
 });
 export const articleTranslationSchema = z.object({
   locale: z.string().trim().toLowerCase().regex(/^[a-z]{2,8}(?:-[a-z0-9]{2,8})?$/)
@@ -39,6 +40,8 @@ export const createArticleSchema = z.object({
   translations: translations.default([]),
   featuredImageUrl: featuredImageUrl.nullish(),
   thumbnailUpload: articleImageUploadSchema.optional(),
+  heroImageUrl: z.string().trim().max(2048).nullish(),
+  heroImageUpload: articleImageUploadSchema.optional(),
   isBreaking: z.boolean().optional(),
   isFeatured: z.boolean().optional(),
 });

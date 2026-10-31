@@ -23,3 +23,26 @@ The archived-delete permission migration uses the same conflict-safe strategy: b
 The presentation-permission migration adds `ARTICLE_SET_BREAKING` and `ARTICLE_SET_FEATURED` to the built-in Editor role on existing installations without resetting other grants. Create and Draft edit can persist both flags with the Article mutation, and flag changes receive their own audit events. Submission, review decisions, scheduling, and publication leave the final flags unchanged. Public reads continue to require `PUBLISHED` status and a reached publish time.
 
 The `ARTICLE_REQUEST_CHANGES` permission is separate from review, publish, update, and unpublish permissions. A conflict-safe migration grants it to built-in Admin and Editor roles on existing installations. Request Changes remains an `IN_REVIEW` to `DRAFT` transition with a required comment: the actor must also have article view access and either `ARTICLE_REVIEW` or the existing own/any update access for that article. Published articles must be explicitly unpublished first; Request Changes never unpublishes. The existing `ARTICLE_CHANGES_REQUESTED` audit event now includes the comment as well as the prior and next statuses.
+
+## Article image optimization
+
+Featured and Markdown content uploads share `article-image.service.ts` and the server-owned `article-image.config.ts` policy: a canonical 1600 × 900 (16:9) AVIF at quality 80, effort 4, and 4:4:4 chroma. Every new uploaded asset uses the same output, without per-card variants. Existing images and external HTTPS URLs are not rewritten.
+
+Sharp fully decodes static JPEG/PNG/WebP inputs, normalizes EXIF orientation, converts to sRGB, and strips private metadata. The complete sharp source is resized proportionally using inside/contain, centered on a blurred enlarged copy of the same source. Only this decorative background uses cover; the foreground is never cropped or distorted. The foreground can be enlarged to fit the canonical canvas; this cannot recreate detail absent from small originals. Transparent source alpha is retained through compositing.
+
+Inputs are limited to 3000 KB and 40 megapixels. Animated images are rejected. The final encoded metadata must confirm AV1 compression and exactly 1600 × 900 before writing a UUID `.avif` served as `image/avif`. The optimizer returns actual format, MIME type, dimensions, aspect ratio, and encoded file size. Output is accepted even if larger than the source.
+
+There is no Media model or persisted equivalent metadata in this project: existing tenant-owned article storage and URL fields remain the system of record. Do not add a parallel Media database. Upload permissions and tenant scoping stay enforced through existing GraphQL services. Clients cannot select encoding parameters.
+
+Public components reuse the same canonical asset. Fixed card layouts remain intact, and contain fitting shows the complete asset within their existing frames, including frames whose physical proportions differ from 16:9. Article detail uses a 16:9 frame. Existing legacy images are also fitted without cropping; re-upload to normalize their stored bytes.
+
+
+## Optional Featured News hero image
+
+Articles retain `featuredImageUrl` for normal cards and may additionally have nullable `heroImageUrl` for the wide homepage banner. There is no Media model or picker yet, so this extends the existing tenant-owned URL/file architecture rather than introducing a second asset system. Existing rows receive null without rewriting their images. The banner resolves `heroImageUrl ?? featuredImageUrl`; normal cards, article detail, search, and Related News continue using `featuredImageUrl`.
+
+`heroImageUpload` is an optional upload in the existing create/update GraphQL inputs. It shares validation, storage, orientation handling, AVIF encoding, metadata removal, and complete-source/blurred-background composition with normal uploads. The centralized presets are `ARTICLE_FEATURED` (1600 × 900) and `ARTICLE_HERO` (1920 × 640), both quality 80. Each source remains limited to 3000 KB and 40 megapixels. Bounded GraphQL request bodies allow two image uploads in one save.
+
+The tenant editor offers an expandable optional Hero Image field with upload, preview and removal. Hero paths are derived from the authenticated tenant and article, never accepted as arbitrary media references: creation requires uploaded bytes, and updates may retain only that article's existing owned hero URL or clear it. Existing Article create/update permission, author-role and editable-status guards still apply. Failed saves remove new files; replacing, clearing or deleting removes old owned files after database success.
+
+A purpose-specific public Featured News operation requests only banner fields, including the optional hero URL. Server Featured reads explicitly select that URL only for `featured: true`; normal list and card reads do not fetch it. The field is nullable so old articles continue to render normally.

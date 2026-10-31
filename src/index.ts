@@ -12,8 +12,8 @@ const yoga = createYoga<GraphQLContext>({
   schema,
   context: createContext,
   graphqlEndpoint: "/graphql",
-  // Leave room for a 1,000 KB base64 image and article text in one mutation.
-  maxRequestBodySize: 2_500_000,
+  // Bound requests while allowing two 3,000 KB image uploads plus article text.
+  maxRequestBodySize: 10_000_000,
   cors: {
     origin: [
       process.env.ADMIN_APP_URL ?? "http://localhost:3000",
@@ -27,7 +27,7 @@ const yoga = createYoga<GraphQLContext>({
 });
 
 const storageRoot = resolve(process.env.LOCAL_STORAGE_PATH ?? join(process.cwd(), "storage"));
-const contentTypes: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
+const contentTypes: Record<string, string> = { ".avif": "image/avif", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
 const server = createServer(async (req, res) => {
   const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
   if (pathname.startsWith("/storage/")) {

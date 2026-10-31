@@ -9,7 +9,7 @@ import { getTenantUserPermissions, type TenantUserPermission } from "@/src/modul
 import { assertArticleTransition, canEditArticleStatus, type ArticleAction } from "./article-policy";
 import { articleAuthorRoles, assertCanManageArticleAuthor } from "./article-role-access";
 import { articleImageUploadSchema, commentSchema, createArticleSchema, scheduleAtSchema, updateArticleSchema } from "./article-validation";
-import { removeArticleThumbnail, saveArticleContentImage, saveArticleThumbnail } from "./article-image.service";
+import { removeArticleThumbnail, saveArticleContentImage, saveArticleThumbnail, saveArticleHero } from "./article-image.service";
 import { breakingExpiresAt } from "@/src/modules/tenants/tenant-content-settings.service";
 
 type PermissionSet = Set<TenantUserPermission>;
@@ -43,6 +43,7 @@ const listSelect = {
 } satisfies Prisma.ArticleSelect;
 const detailSelect = {
   ...listSelect,
+  heroImageUrl: true,
   summary: true, content: true, subcategoryUuid: true, publishedAt: true, archivedAt: true,
   createdAt: true, publishedByUuid: true,
   subcategory: { select: { translations: { where: { locale: "en" }, select: { name: true } } } },
@@ -61,7 +62,7 @@ function mapList(row: ListRow, authorRole: "ADMIN" | "EDITOR" | null) {
     updatedAt: row.updatedAt.toISOString() };
 }
 function mapDetail(row: DetailRow, authorRole: "ADMIN" | "EDITOR" | null) {
-  return { ...mapList(row, authorRole), summary: row.summary, content: row.content,
+  return { ...mapList(row, authorRole), heroImageUrl: row.heroImageUrl, summary: row.summary, content: row.content,
     subcategoryId: row.subcategoryUuid, subcategoryName: row.subcategory.translations[0]?.name ?? "",
     publishedAt: row.publishedAt?.toISOString() ?? null, archivedAt: row.archivedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(), publishedById: row.publishedByUuid,
@@ -73,7 +74,7 @@ function mapDetail(row: DetailRow, authorRole: "ADMIN" | "EDITOR" | null) {
 async function rowForAction(id: string, tenantUuid: string) {
   const uuid = parse(z.string().uuid(), id);
   const row = await prisma.article.findFirst({ where: { uuid, tenantUuid },
-    select: { uuid: true, status: true, createdByUuid: true, title: true, content: true, featuredImageUrl: true,
+    select: { uuid: true, status: true, createdByUuid: true, title: true, content: true, featuredImageUrl: true, heroImageUrl: true,
       isBreaking: true, isFeatured: true,
       categoryUuid: true, subcategoryUuid: true, slug: true, scheduledAt: true,
       translations: { select: { locale: true, title: true, content: true } } } });
@@ -163,12 +164,15 @@ export async function createArticle(session: SessionPayload, input: unknown) {
   requirePermission(permissions, "ARTICLE_CREATE");
   const data = parse(createArticleSchema, input);
   if (data.featuredImageUrl?.startsWith("/storage/")) throw validationError("Choose a new thumbnail upload or an HTTPS image URL");
+  if (data.heroImageUrl) throw validationError("Upload a hero image for this article instead of selecting another asset");
   if (data.isBreaking) requirePermission(permissions, "ARTICLE_SET_BREAKING");
   if (data.isFeatured) requirePermission(permissions, "ARTICLE_SET_FEATURED");
   await validateRelations(tenantUuid, permissions, data.categoryId, data.subcategoryId, data.tagIds);
   const articleId = randomUUID();
   const uploadedUrl = data.thumbnailUpload ? await saveArticleThumbnail(tenantUuid, articleId, data.thumbnailUpload) : null;
+  let heroUrl: string | null = null;
   try {
+    if (data.heroImageUpload) heroUrl = await saveArticleHero(tenantUuid, articleId, data.heroImageUpload);
     await prisma.$transaction(async (tx) => {
       const created = await tx.article.create({ data: {
         uuid: articleId,
@@ -177,7 +181,7 @@ export async function createArticle(session: SessionPayload, input: unknown) {
         category: { connect: { uuid_tenantUuid: { uuid: data.categoryId, tenantUuid } } },
         subcategory: { connect: { uuid_tenantUuid_categoryUuid: { uuid: data.subcategoryId, tenantUuid, categoryUuid: data.categoryId } } },
         title: data.title, slug: data.slug, summary: data.summary ?? null,
-        content: data.content, featuredImageUrl: uploadedUrl ?? data.featuredImageUrl ?? null,
+        content: data.content, featuredImageUrl: uploadedUrl ?? data.featuredImageUrl ?? null, heroImageUrl: heroUrl,
         isBreaking: data.isBreaking ?? false, isFeatured: data.isFeatured ?? false,
         translations: { create: data.translations.map((item) => ({ ...item, summary: item.summary ?? null })) },
       }, select: { uuid: true } });
@@ -195,6 +199,7 @@ export async function createArticle(session: SessionPayload, input: unknown) {
     });
   } catch (error) {
     if (uploadedUrl) await removeArticleThumbnail(tenantUuid, articleId, uploadedUrl).catch(() => {});
+    if (heroUrl) await removeArticleThumbnail(tenantUuid, articleId, heroUrl).catch(() => {});
     return mapMutationError(error);
   }
   return getArticle(session, articleId);
@@ -213,6 +218,9 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
   if (data.featuredImageUrl?.startsWith("/storage/") && data.featuredImageUrl !== row.featuredImageUrl) {
     throw validationError("You cannot select another article's thumbnail");
   }
+  if (data.heroImageUrl && (data.heroImageUrl !== row.heroImageUrl || !data.heroImageUrl.startsWith(`/storage/tenants/${tenantUuid}/articles/${row.uuid}/`))) {
+    throw validationError("Hero image must belong to this article and tenant");
+  }
   if (data.isBreaking !== undefined) requirePermission(permissions, "ARTICLE_SET_BREAKING");
   if (data.isFeatured !== undefined) requirePermission(permissions, "ARTICLE_SET_FEATURED");
   if (data.categoryId || data.subcategoryId || data.tagIds) {
@@ -220,7 +228,13 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
   }
   const uploadedUrl = data.thumbnailUpload ? await saveArticleThumbnail(tenantUuid, row.uuid, data.thumbnailUpload) : null;
   const nextImageUrl = uploadedUrl ?? data.featuredImageUrl;
+  let uploadedHeroUrl: string | null = null;
+  let nextHeroUrl = data.heroImageUrl;
   try {
+    if (data.heroImageUpload) {
+      uploadedHeroUrl = await saveArticleHero(tenantUuid, row.uuid, data.heroImageUpload);
+      nextHeroUrl = uploadedHeroUrl;
+    }
     await prisma.$transaction(async (tx) => {
       await tx.article.update({ where: { uuid: row.uuid, tenantUuid, status: row.status }, data: {
         title: data.title, slug: data.slug, summary: data.summary, content: data.content,
@@ -228,7 +242,7 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
         ...(data.categoryId || data.subcategoryId ? { subcategory: { connect: { uuid_tenantUuid_categoryUuid: {
           uuid: data.subcategoryId ?? row.subcategoryUuid, tenantUuid, categoryUuid: data.categoryId ?? row.categoryUuid,
         } } } } : {}),
-        featuredImageUrl: nextImageUrl,
+        featuredImageUrl: nextImageUrl, heroImageUrl: nextHeroUrl,
         isBreaking: data.isBreaking, isFeatured: data.isFeatured,
         ...(data.translations ? { translations: { deleteMany: {}, create: data.translations.map((item) => ({ ...item, summary: item.summary ?? null })) } } : {}),
       }, select: { uuid: true } });
@@ -249,10 +263,14 @@ export async function updateArticle(session: SessionPayload, id: string, input: 
     });
   } catch (error) {
     if (uploadedUrl) await removeArticleThumbnail(tenantUuid, row.uuid, uploadedUrl).catch(() => {});
+    if (uploadedHeroUrl) await removeArticleThumbnail(tenantUuid, row.uuid, uploadedHeroUrl).catch(() => {});
     return mapMutationError(error);
   }
   if (nextImageUrl !== undefined && nextImageUrl !== row.featuredImageUrl) {
     await removeArticleThumbnail(tenantUuid, row.uuid, row.featuredImageUrl).catch(() => {});
+  }
+  if (nextHeroUrl !== undefined && nextHeroUrl !== row.heroImageUrl) {
+    await removeArticleThumbnail(tenantUuid, row.uuid, row.heroImageUrl).catch(() => {});
   }
   return getArticle(session, row.uuid);
 }
@@ -271,6 +289,7 @@ export async function deleteArticle(session: SessionPayload, id: string) {
         targetType: "article", targetUuid: row.uuid, metadata: { title: row.title, previousStatus: row.status } }, tx);
     });
     await removeArticleThumbnail(tenantUuid, row.uuid, row.featuredImageUrl).catch(() => {});
+    await removeArticleThumbnail(tenantUuid, row.uuid, row.heroImageUrl).catch(() => {});
     return true;
   } catch (error) { return mapMutationError(error); }
 }
@@ -289,6 +308,7 @@ export async function deleteArchivedArticle(session: SessionPayload, id: string)
         targetType: "article", targetUuid: row.uuid, metadata: { title: row.title, previousStatus: row.status } }, tx);
     });
     await removeArticleThumbnail(tenantUuid, row.uuid, row.featuredImageUrl).catch(() => {});
+    await removeArticleThumbnail(tenantUuid, row.uuid, row.heroImageUrl).catch(() => {});
     return true;
   } catch (error) { return mapMutationError(error); }
 }

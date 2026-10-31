@@ -148,6 +148,7 @@ type PublicWebsiteArticleSummary {
   isBreaking: Boolean!
   isFeatured: Boolean!
   featuredImageUrl: String
+  heroImageUrl: String
   publishedAt: String!
   translations: [PublicWebsiteArticleLocale!]!
 }
@@ -192,6 +193,7 @@ type Article {
   isBreaking: Boolean!
   isFeatured: Boolean!
   featuredImageUrl: String
+  heroImageUrl: String
   scheduledAt: String
   publishedAt: String
   archivedAt: String
@@ -207,12 +209,14 @@ input CreateArticleInput {
   title: String!, slug: String!, summary: String, content: String!,
   categoryId: ID!, subcategoryId: ID!, tagIds: [ID!],
   translations: [ArticleTranslationInput!], featuredImageUrl: String, thumbnailUpload: ArticleImageUploadInput,
+  heroImageUrl: String, heroImageUpload: ArticleImageUploadInput,
   isBreaking: Boolean, isFeatured: Boolean
 }
 input UpdateArticleInput {
   title: String, slug: String, summary: String, content: String,
   categoryId: ID, subcategoryId: ID, tagIds: [ID!],
   translations: [ArticleTranslationInput!], featuredImageUrl: String, thumbnailUpload: ArticleImageUploadInput,
+  heroImageUrl: String, heroImageUpload: ArticleImageUploadInput,
   isBreaking: Boolean, isFeatured: Boolean
 }
 
