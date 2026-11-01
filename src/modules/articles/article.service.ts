@@ -1,5 +1,5 @@
 import { searchPageSchema, pageOffset } from "@/src/lib/search";
-import { ArticleStatus, Prisma, TenantType } from "@prisma/client";
+import { ArticleStatus, Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { SessionPayload } from "@/src/lib/auth/session";

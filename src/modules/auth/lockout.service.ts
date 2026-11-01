@@ -4,7 +4,6 @@ import {
   ACCOUNT_LOCKOUT_TTL_MS,
   MAX_ACCOUNT_AUTH_ATTEMPTS,
 } from "@/src/lib/auth/constants";
-import { unauthenticated } from "@/src/lib/errors";
 import { writeAuthAudit } from "@/src/modules/auth/audit-auth";
 import type { LoadedAccount } from "@/src/modules/users/account";
 

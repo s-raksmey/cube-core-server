@@ -1,5 +1,4 @@
 import { TenantType, UserStatus } from "@prisma/client";
-import { z } from "zod";
 import { prisma } from "@/src/lib/db";
 import {
   hashPassword,
