@@ -1,3 +1,4 @@
+import { parseSearchPage, pageOffset } from "@/src/lib/search";
 import { Prisma, TenantType } from "@prisma/client";
 import { z } from "zod";
 import type { SessionPayload } from "@/src/lib/auth/session";
@@ -19,6 +20,17 @@ const includeCategory = {
 const includeCategoryWithoutSubcategories = { translations: { select: { locale: true, name: true }, orderBy: { locale: "asc" as const } } };
 const includeSubcategory = { translations: { select: { locale: true, name: true }, orderBy: { locale: "asc" as const } } };
 
+const subcategorySelect = {
+  uuid: true, categoryUuid: true, slug: true, createdAt: true, updatedAt: true,
+  translations: { select: { locale: true, name: true }, orderBy: { locale: "asc" } },
+} satisfies Prisma.SubcategorySelect;
+const categorySelect = {
+  uuid: true, slug: true, name: true, createdAt: true, updatedAt: true,
+  translations: { select: { locale: true, name: true }, orderBy: { locale: "asc" } },
+} satisfies Prisma.CategorySelect;
+type SubcategoryRow = Prisma.SubcategoryGetPayload<{ select: typeof subcategorySelect }>;
+type CategoryRow = Prisma.CategoryGetPayload<{ select: typeof categorySelect }> & { subcategories?: SubcategoryRow[] };
+
 async function requireTenant(session: SessionPayload, permission: TenantUserPermission) {
   if (session.audience !== "TENANT_APP" || session.role === "SUPERADMIN") throw forbidden("Sub-tenant access is required");
   const tenant = await prisma.tenant.findFirst({ where: { uuid: session.tenantId, type: TenantType.SUB, deletedAt: null }, select: { uuid: true } });
@@ -26,17 +38,47 @@ async function requireTenant(session: SessionPayload, permission: TenantUserPerm
   await requireTenantUserPermission(session, permission);
   return tenant.uuid;
 }
-function mapCategory(row: any) { return { id: row.uuid, slug: row.slug, name: row.name, translations: row.translations, subcategories: row.subcategories?.map(mapSubcategory) ?? [], createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
-function mapSubcategory(row: any) { return { id: row.uuid, categoryId: row.categoryUuid, slug: row.slug, translations: row.translations, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
+function mapCategory(row: CategoryRow) { return { id: row.uuid, slug: row.slug, name: row.name, translations: row.translations, subcategories: row.subcategories?.map(mapSubcategory) ?? [], createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
+function mapSubcategory(row: SubcategoryRow) { return { id: row.uuid, categoryId: row.categoryUuid, slug: row.slug, translations: row.translations, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }; }
 function parse<T>(schema: z.ZodType<T>, value: unknown) { const parsed = schema.safeParse(value); if (!parsed.success) throw validationError(parsed.error.issues[0]?.message ?? "Invalid category input"); return parsed.data; }
 function englishName(translations: { locale: string; name: string }[]) { const value = translations.find((translation) => translation.locale === "en")?.name; if (!value) throw validationError("An English category name is required"); return value; }
 
-export async function listCategories(session: SessionPayload, search?: string | null) { const tenantId = await requireTenant(session, "CATEGORY_VIEW"); const canViewSubcategories = (await getTenantUserPermissions(session)).includes("CATEGORY_VIEW_SUBCATEGORY"); const value = search?.trim(); const rows = await prisma.category.findMany({ where: { tenantUuid: tenantId, ...(value ? { OR: [{ slug: { contains: value, mode: "insensitive" } }, { translations: { some: { name: { contains: value, mode: "insensitive" } } } }] } : {}) }, include: canViewSubcategories ? includeCategory : includeCategoryWithoutSubcategories, orderBy: { slug: "asc" } }); return rows.map(mapCategory); }
+export async function listCategories(session: SessionPayload, search?: string | null, page?: number | null, pageSize?: number | null) {
+  const tenantUuid = await requireTenant(session, "CATEGORY_VIEW");
+  const filter = parseSearchPage({ search, page, pageSize });
+  const canViewSubcategories = (await getTenantUserPermissions(session)).includes("CATEGORY_VIEW_SUBCATEGORY");
+  const where: Prisma.CategoryWhereInput = { tenantUuid, ...(filter.search ? { OR: [
+    { name: { contains: filter.search, mode: "insensitive" } },
+    { slug: { contains: filter.search, mode: "insensitive" } },
+    { translations: { some: { name: { contains: filter.search, mode: "insensitive" } } } },
+  ] } : {}) };
+  const [rows, total] = await prisma.$transaction([
+    prisma.category.findMany({ where, select: { ...categorySelect,
+      subcategories: { select: subcategorySelect, where: canViewSubcategories ? {} : { uuid: { in: [] } }, orderBy: [{ slug: "asc" }, { uuid: "asc" }], take: 100 },
+    }, orderBy: [{ slug: "asc" }, { uuid: "asc" }], skip: pageOffset(filter.page, filter.pageSize), take: filter.pageSize }),
+    prisma.category.count({ where }),
+  ]);
+  return { items: rows.map(mapCategory), total, page: filter.page, pageSize: filter.pageSize };
+}
 export async function getCategory(session: SessionPayload, id: string) { const tenantId = await requireTenant(session, "CATEGORY_VIEW"); const canViewSubcategories = (await getTenantUserPermissions(session)).includes("CATEGORY_VIEW_SUBCATEGORY"); const row = await prisma.category.findFirst({ where: { uuid: id, tenantUuid: tenantId }, include: canViewSubcategories ? includeCategory : includeCategoryWithoutSubcategories }); return row ? mapCategory(row) : null; }
 export async function createCategory(session: SessionPayload, input: unknown) { const tenantId = await requireTenant(session, "CATEGORY_CREATE"); const data = parse(categoryInput, input); try { return mapCategory(await prisma.category.create({ data: { tenantUuid: tenantId, slug: data.slug, name: englishName(data.translations), translations: { create: data.translations } }, include: includeCategory })); } catch { throw validationError("A category with this slug already exists"); } }
 export async function updateCategory(session: SessionPayload, id: string, input: unknown) { const tenantId = await requireTenant(session, "CATEGORY_EDIT"); const data = parse(updateInput, input); const existing = await prisma.category.findFirst({ where: { uuid: id, tenantUuid: tenantId }, select: { uuid: true } }); if (!existing) throw notFound("Category not found"); try { return mapCategory(await prisma.category.update({ where: { uuid: id }, data: { ...(data.slug ? { slug: data.slug } : {}), ...(data.translations ? { name: englishName(data.translations), translations: { deleteMany: {}, create: data.translations } } : {}) }, include: includeCategory })); } catch { throw validationError("A category with this slug already exists"); } }
 export async function deleteCategory(session: SessionPayload, id: string) { const tenantId = await requireTenant(session, "CATEGORY_DELETE"); const row = await prisma.category.findFirst({ where: { uuid: id, tenantUuid: tenantId }, select: { uuid: true } }); if (!row) throw notFound("Category not found"); await prisma.category.delete({ where: { uuid: id } }); return true; }
-export async function listSubcategories(session: SessionPayload, categoryId?: string | null, search?: string | null) { const tenantId = await requireTenant(session, "CATEGORY_VIEW_SUBCATEGORY"); const value = search?.trim(); const rows = await prisma.subcategory.findMany({ where: { tenantUuid: tenantId, ...(categoryId ? { categoryUuid: categoryId } : {}), ...(value ? { OR: [{ slug: { contains: value, mode: "insensitive" } }, { translations: { some: { name: { contains: value, mode: "insensitive" } } } }] } : {}) }, include: includeSubcategory, orderBy: { slug: "asc" } }); return rows.map(mapSubcategory); }
+export async function listSubcategories(session: SessionPayload, categoryId?: string | null, search?: string | null, page?: number | null, pageSize?: number | null) {
+  const tenantUuid = await requireTenant(session, "CATEGORY_VIEW_SUBCATEGORY");
+  const filter = parseSearchPage({ search, page, pageSize });
+  const categoryUuid = parse(z.string().uuid().nullish(), categoryId);
+  const where: Prisma.SubcategoryWhereInput = { tenantUuid, ...(categoryUuid ? { categoryUuid } : {}), ...(filter.search ? { OR: [
+    { slug: { contains: filter.search, mode: "insensitive" } },
+    { translations: { some: { name: { contains: filter.search, mode: "insensitive" } } } },
+  ] } : {}) };
+  const [rows, total] = await prisma.$transaction([
+    prisma.subcategory.findMany({ where, select: subcategorySelect, orderBy: [{ slug: "asc" }, { uuid: "asc" }],
+      skip: pageOffset(filter.page, filter.pageSize), take: filter.pageSize }),
+    prisma.subcategory.count({ where }),
+  ]);
+  return { items: rows.map(mapSubcategory), total, page: filter.page, pageSize: filter.pageSize };
+}
 export async function getSubcategory(session: SessionPayload, id: string) { const tenantId = await requireTenant(session, "CATEGORY_VIEW_SUBCATEGORY"); const row = await prisma.subcategory.findFirst({ where: { uuid: id, tenantUuid: tenantId }, include: includeSubcategory }); return row ? mapSubcategory(row) : null; }
 export async function createSubcategory(session: SessionPayload, input: unknown) { const tenantId = await requireTenant(session, "CATEGORY_CREATE_SUBCATEGORY"); const data = parse(subcategoryInput, input); const parent = await prisma.category.findFirst({ where: { uuid: data.categoryId, tenantUuid: tenantId }, select: { uuid: true } }); if (!parent) throw notFound("Category not found"); try { return mapSubcategory(await prisma.subcategory.create({ data: { tenantUuid: tenantId, categoryUuid: data.categoryId, slug: data.slug, translations: { create: data.translations } }, include: includeSubcategory })); } catch { throw validationError("A subcategory with this slug already exists"); } }
 export async function updateSubcategory(session: SessionPayload, id: string, input: unknown) { const tenantId = await requireTenant(session, "CATEGORY_EDIT_SUBCATEGORY"); const data = parse(updateInput, input); const existing = await prisma.subcategory.findFirst({ where: { uuid: id, tenantUuid: tenantId }, select: { uuid: true } }); if (!existing) throw notFound("Subcategory not found"); try { return mapSubcategory(await prisma.subcategory.update({ where: { uuid: id }, data: { ...(data.slug ? { slug: data.slug } : {}), ...(data.translations ? { name: englishName(data.translations), translations: { deleteMany: {}, create: data.translations } } : {}) }, include: includeSubcategory })); } catch { throw validationError("A subcategory with this slug already exists"); } }

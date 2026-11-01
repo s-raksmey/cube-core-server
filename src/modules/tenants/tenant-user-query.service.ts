@@ -1,3 +1,4 @@
+import { searchPageSchema, parseSearchPage, pageOffset } from "@/src/lib/search";
 import {
   MembershipStatus,
   Prisma,
@@ -22,12 +23,7 @@ async function requireMainSuperAdmin(session: SessionPayload) {
   }
 }
 
-const managedTenantUsersInputSchema = z.object({
-  tenantId: z.string().uuid(),
-  search: z.string().trim().max(100).nullish(),
-  page: z.number().int().min(1).optional(),
-  pageSize: z.number().int().min(1).max(50).optional(),
-});
+const managedTenantUsersInputSchema = searchPageSchema.extend({ tenantId: z.string().uuid() });
 export function deriveActivationStatus(
   user: {
     status: UserStatus;
@@ -73,7 +69,7 @@ export async function listManagedSubTenantUsers(
   if (!tenant) throw validationError("Sub-tenant not found");
 
   const page = parsed.data.page ?? 1;
-  const pageSize = parsed.data.pageSize ?? 10;
+  const pageSize = parsed.data.pageSize;
   const search = parsed.data.search;
   const where: Prisma.TenantMembershipWhereInput = {
     tenantUuid: tenant.uuid,
@@ -87,6 +83,7 @@ export async function listManagedSubTenantUsers(
               { firstName: { contains: search, mode: "insensitive" } },
               { lastName: { contains: search, mode: "insensitive" } },
               { email: { contains: search, mode: "insensitive" } },
+              { username: { contains: search, mode: "insensitive" } },
             ],
           }
         : {}),
@@ -120,8 +117,8 @@ export async function listManagedSubTenantUsers(
           },
         },
       },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * pageSize,
+      orderBy: [{ createdAt: "desc" }, { uuid: "asc" }],
+      skip: pageOffset(page, pageSize),
       take: pageSize,
     }),
     prisma.tenantMembership.count({ where }),
@@ -155,9 +152,8 @@ export async function listTenantUsers(
 ) {
   await requireTenantUserPermission(session, "USERS_VIEW");
 
-  const page = Math.max(1, input?.page ?? 1);
-  const pageSize = Math.min(50, Math.max(1, input?.pageSize ?? 10));
-  const search = input?.search?.trim();
+  if (session.audience !== "TENANT_APP" || session.role === "SUPERADMIN") throw forbidden("Sub-tenant access is required");
+  const { search, page, pageSize } = parseSearchPage(input);
 
   const where: Prisma.TenantMembershipWhereInput = {
     tenantUuid: session.tenantId,
@@ -208,8 +204,8 @@ export async function listTenantUsers(
           },
         },
       },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * pageSize,
+      orderBy: [{ createdAt: "desc" }, { uuid: "asc" }],
+      skip: pageOffset(page, pageSize),
       take: pageSize,
     }),
     prisma.tenantMembership.count({ where }),

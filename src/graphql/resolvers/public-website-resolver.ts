@@ -1,6 +1,6 @@
 import {
   publicWebsiteArticle,
-  publicWebsiteArticles,
+  publicWebsiteArticlesForHostname,
   publicWebsiteCategories,
   publicWebsitePopularArticles,
   publicWebsiteRelatedArticles,
@@ -13,9 +13,9 @@ export const publicWebsiteResolver = {
   Query: {
     publicWebsiteCategories: (_: unknown, args: { tenantId: string }) => publicWebsiteCategories(args.tenantId),
     publicWebsiteTags: (_: unknown, args: { tenantId: string }) => publicWebsiteTags(args.tenantId),
-    publicWebsiteArticles: (_: unknown, args: { tenantId: string; categorySlug?: string | null; subcategorySlug?: string | null; tagSlug?: string | null;
+    publicWebsiteArticles: (_: unknown, args: { hostname: string; tenantId: string; categorySlug?: string | null; subcategorySlug?: string | null; tagSlug?: string | null;
       search?: string | null; featured?: boolean | null; breaking?: boolean | null; page?: number; pageSize?: number }) =>
-      publicWebsiteArticles(args.tenantId, args),
+      publicWebsiteArticlesForHostname(args.hostname, args.tenantId, args),
     publicWebsiteArticle: (_: unknown, args: { tenantId: string; slug: string }) => publicWebsiteArticle(args.tenantId, args.slug),
     publicWebsiteRelatedArticles: (_: unknown, args: { tenantId: string; slug: string; limit?: number }) =>
       publicWebsiteRelatedArticles(args.tenantId, args.slug, args.limit),

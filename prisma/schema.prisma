@@ -249,6 +249,7 @@ model User {
   lastName               String     @map("last_name")
   username               String?    @unique
   email                  String     @unique
+  avatarPath             String?    @map("avatar_path")
   passwordHash           String?    @map("password_hash")
   status                 UserStatus @default(PENDING)
   createdByUuid          String?    @map("created_by")

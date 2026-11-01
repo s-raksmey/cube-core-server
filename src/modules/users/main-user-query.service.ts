@@ -1,28 +1,25 @@
+import { requireMainSuperAdmin as requireMainConsole } from "@/src/modules/tenants/tenant-console-access.service";
 import {
   Prisma,
   TenantType,
 } from "@prisma/client";
-import { z } from "zod";
+import { searchPageSchema, pageOffset } from "@/src/lib/search";
 import { prisma } from "@/src/lib/db";
 import type { SessionPayload } from "@/src/lib/auth/session";
 import { validationError } from "@/src/lib/errors";
 import { displayFullName, findAccountByUuid, getMainTenant } from "@/src/modules/users/account";
 import { mapMainTenantUser, requireMainSuperAdmin } from "@/src/modules/users/main-user-shared.service";
 
-const listSchema = z.object({
-  search: z.string().trim().max(120).optional(),
-  page: z.number().int().min(1).default(1),
-  pageSize: z.number().int().min(1).max(50).default(10),
-});
+const listSchema = searchPageSchema;
 export async function listMainTenantUsers(
   session: SessionPayload,
   input?: { search?: string | null; page?: number | null; pageSize?: number | null },
 ) {
-  await requireMainSuperAdmin(session);
+  await requireMainConsole(session);
   const parsed = listSchema.safeParse({
     search: input?.search ?? undefined,
     page: input?.page ?? 1,
-    pageSize: input?.pageSize ?? 10,
+    pageSize: input?.pageSize ?? 25,
   });
   if (!parsed.success) {
     throw validationError(parsed.error.issues[0]?.message ?? "Invalid input");
@@ -75,8 +72,8 @@ export async function listMainTenantUsers(
           },
         },
       },
-      orderBy: { createdAt: "desc" },
-      skip: (parsed.data.page - 1) * parsed.data.pageSize,
+      orderBy: [{ createdAt: "desc" }, { uuid: "asc" }],
+      skip: pageOffset(parsed.data.page, parsed.data.pageSize),
       take: parsed.data.pageSize,
     }),
     prisma.tenantMembership.count({ where }),

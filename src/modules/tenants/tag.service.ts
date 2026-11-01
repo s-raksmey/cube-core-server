@@ -1,3 +1,4 @@
+import { parseSearchPage, pageOffset } from "@/src/lib/search";
 import { Prisma, TenantType } from "@prisma/client";
 import { z } from "zod";
 import type { SessionPayload } from "@/src/lib/auth/session";
@@ -44,14 +45,20 @@ function mutationError(error: unknown): never {
   }
   throw error;
 }
-export async function listTags(session: SessionPayload, search?: string | null, page = 1, pageSize = 25) {
+export async function listTags(session: SessionPayload, search?: string | null, page?: number | null, pageSize?: number | null) {
   const tenantUuid = await requireTenant(session, "TAG_VIEW");
-  const pagination = parse(z.object({ page: z.number().int().min(1).max(100000), pageSize: z.number().int().min(1).max(100) }), { page, pageSize });
-  const query = parse(z.string().trim().max(160).optional(), search ?? undefined);
-  return (await prisma.tag.findMany({
-    where: { tenantUuid, ...(query ? { OR: [{ name: { contains: query, mode: "insensitive" as const } }, { slug: { contains: query, mode: "insensitive" as const } }, { translations: { some: { name: { contains: query, mode: "insensitive" as const } } } }] } : {}) },
-    select: tagSelect, orderBy: [{ name: "asc" }, { uuid: "asc" }], skip: (pagination.page - 1) * pagination.pageSize, take: pagination.pageSize,
-  })).map(mapTag);
+  const filter = parseSearchPage({ search, page, pageSize });
+  const where: Prisma.TagWhereInput = { tenantUuid, ...(filter.search ? { OR: [
+    { name: { contains: filter.search, mode: "insensitive" } },
+    { slug: { contains: filter.search, mode: "insensitive" } },
+    { translations: { some: { name: { contains: filter.search, mode: "insensitive" } } } },
+  ] } : {}) };
+  const [rows, total] = await prisma.$transaction([
+    prisma.tag.findMany({ where, select: tagSelect, orderBy: [{ name: "asc" }, { uuid: "asc" }],
+      skip: pageOffset(filter.page, filter.pageSize), take: filter.pageSize }),
+    prisma.tag.count({ where }),
+  ]);
+  return { items: rows.map(mapTag), total, page: filter.page, pageSize: filter.pageSize };
 }
 export async function getTag(session: SessionPayload, id: string) {
   const tenantUuid = await requireTenant(session, "TAG_VIEW");

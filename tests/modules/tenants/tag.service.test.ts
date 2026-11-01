@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
-const mocks = vi.hoisted(() => ({ tenant: vi.fn(), permission: vi.fn(), list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() }));
-vi.mock("@/src/lib/db", () => ({ prisma: { tenant: { findFirst: mocks.tenant }, tag: { findMany: mocks.list, findFirst: mocks.get, create: mocks.create, update: mocks.update, delete: mocks.remove } } }));
+const mocks = vi.hoisted(() => ({ tenant: vi.fn(), permission: vi.fn(), list: vi.fn(), count: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() }));
+vi.mock("@/src/lib/db", () => ({ prisma: { $transaction: (queries: Promise<unknown>[]) => Promise.all(queries), tenant: { findFirst: mocks.tenant }, tag: { findMany: mocks.list, count: mocks.count, findFirst: mocks.get, create: mocks.create, update: mocks.update, delete: mocks.remove } } }));
 vi.mock("@/src/modules/roles/role-permission.service", () => ({ requireTenantUserPermission: mocks.permission }));
 import { createTag, createTagSchema, updateTagSchema, listTags, getTag, updateTag, deleteTag } from "@/src/modules/tenants/tag.service";
 import type { SessionPayload } from "@/src/lib/auth/session";
 const session = { audience: "TENANT_APP", role: "EDITOR", tenantId: "tenant-a", userId: "user-a" } as SessionPayload;
 const id = "00000000-0000-4000-8000-000000000001";
 const row = { uuid: id, name: "AI", slug: "ai", translations: [], createdAt: new Date(), updatedAt: new Date() };
-beforeEach(() => { vi.resetAllMocks(); mocks.tenant.mockResolvedValue({ uuid: "tenant-a" }); mocks.list.mockResolvedValue([]); mocks.create.mockResolvedValue(row); mocks.update.mockResolvedValue(row); });
+beforeEach(() => { vi.resetAllMocks(); mocks.tenant.mockResolvedValue({ uuid: "tenant-a" }); mocks.list.mockResolvedValue([]); mocks.count.mockResolvedValue(0); mocks.create.mockResolvedValue(row); mocks.update.mockResolvedValue(row); });
 describe("tag validation", () => {
   it("allows no translations and normalizes names, slugs and locales", () => {
     expect(createTagSchema.parse({ name: " AI ", slug: " AI " })).toEqual({ name: "AI", slug: "ai", translations: [] });

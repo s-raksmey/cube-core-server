@@ -100,6 +100,10 @@ input UpdateCategoryInput { slug: String, translations: [TranslationInput!] }
 input CreateSubcategoryInput { categoryId: ID!, slug: String!, translations: [TranslationInput!] }
 input UpdateSubcategoryInput { slug: String, translations: [TranslationInput!] }
 
+type CategoryPage { items: [Category!]!, total: Int!, page: Int!, pageSize: Int! }
+type SubcategoryPage { items: [Subcategory!]!, total: Int!, page: Int!, pageSize: Int! }
+type TagPage { items: [Tag!]!, total: Int!, page: Int!, pageSize: Int! }
+
 type CategoryTranslation { locale: String!, name: String! }
 type SubcategoryTranslation { locale: String!, name: String! }
 type TagTranslation { locale: String!, name: String! }
@@ -425,7 +429,11 @@ input UpdateSubTenantInput {
   localDevelopmentHostname: String
 }
 
+input ProfileImageInput { fileName: String!, mimeType: String!, contentBase64: String! }
+input UpdateMyProfileInput { firstName: String!, lastName: String!, username: String, image: ProfileImageInput, removeImage: Boolean = false }
+
 type User {
+  avatarUrl: String
   id: ID!
   email: String!
   username: String
@@ -725,17 +733,17 @@ type Query {
   publicGeneralSettings(hostname: String!): PublicGeneralSettings
   platformAuditLogs(page: Int): AuditLogPage!
   tenantAuditLogs(page: Int): AuditLogPage!
-  categories(search: String): [Category!]!
+  categories(search: String, page: Int, pageSize: Int): CategoryPage!
   category(id: ID!): Category
-  subcategories(categoryId: ID, search: String): [Subcategory!]!
+  subcategories(categoryId: ID, search: String, page: Int, pageSize: Int): SubcategoryPage!
   subcategory(id: ID!): Subcategory
-  tags(search: String, page: Int = 1, pageSize: Int = 25): [Tag!]!
+  tags(search: String, page: Int, pageSize: Int): TagPage!
   tag(id: ID!): Tag
   articles(search: String, status: ArticleStatus, categoryId: ID, scope: ArticleScope, page: Int, pageSize: Int): ArticlePage!
   article(id: ID!): Article
   publicWebsiteCategories(tenantId: ID!): [PublicWebsiteNavigationCategory!]!
   publicWebsiteTags(tenantId: ID!): [PublicWebsiteTag!]!
-  publicWebsiteArticles(tenantId: ID!, categorySlug: String, subcategorySlug: String, tagSlug: String, search: String, featured: Boolean, breaking: Boolean, page: Int = 1, pageSize: Int = 12): PublicWebsiteArticlePage!
+  publicWebsiteArticles(tenantId: ID!, hostname: String!, categorySlug: String, subcategorySlug: String, tagSlug: String, search: String, featured: Boolean, breaking: Boolean, page: Int = 1, pageSize: Int = 25): PublicWebsiteArticlePage!
   publicWebsiteArticle(tenantId: ID!, slug: String!): PublicWebsiteArticle
   publicWebsiteRelatedArticles(tenantId: ID!, slug: String!, limit: Int = 4): [PublicWebsiteArticleSummary!]!
   publicWebsitePopularArticles(tenantId: ID!, limit: Int = 4): [PublicWebsiteArticleSummary!]!
@@ -757,6 +765,7 @@ type Query {
 }
 
 type Mutation {
+  updateMyProfile(input: UpdateMyProfileInput!): User!
   recordPublicWebsiteArticleView(hostname: String!, articleId: ID!, visitorId: ID!): Boolean!
   recordPublicWebsiteArticleShare(hostname: String!, articleId: ID!, visitorId: ID!, platform: ArticleSharePlatform!): Boolean!
   updateTenantBranding(tenantId: ID!, asset: BrandingAsset!, fileName: String!, mimeType: String!, contentBase64: String): TenantBranding!

@@ -68,7 +68,7 @@ describe("public article discovery", () => {
       where: expect.objectContaining({ tenantUuid: tenantId, status: ArticleStatus.PUBLISHED, publishedAt: { lte: expect.any(Date) } }),
       orderBy: [{ publishedAt: "desc" }, { uuid: "desc" }],
       select: expect.not.objectContaining({ content: true }),
-      take: 12,
+      take: 25,
     }));
     expect(mocks.findMany.mock.calls[0][0].select).toMatchObject({ viewCount: true, shareCount: true });
   });

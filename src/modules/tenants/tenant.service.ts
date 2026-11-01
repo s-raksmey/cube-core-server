@@ -1,3 +1,4 @@
+import { parseSearchPage, pageOffset } from "@/src/lib/search";
 import {
   MembershipStatus,
   Prisma,
@@ -19,7 +20,7 @@ import {
 } from "@/src/modules/tenants/tenant-input-validation";
 import { getMainTenant } from "@/src/modules/users/account";
 import { mapTenant } from "@/src/modules/tenants/tenant.mapper";
-import { requireSuperAdmin } from "@/src/modules/tenants/tenant-console-access.service";
+import { requireSuperAdmin, requireMainSuperAdmin } from "@/src/modules/tenants/tenant-console-access.service";
 
 export async function createSubTenant(
   session: SessionPayload,
@@ -282,10 +283,8 @@ export async function listSubTenants(
   session: SessionPayload,
   input?: { search?: string; page?: number; pageSize?: number },
 ) {
-  await requireSuperAdmin(session);
-  const page = Math.max(1, input?.page ?? 1);
-  const pageSize = Math.min(50, Math.max(1, input?.pageSize ?? 10));
-  const search = input?.search?.trim();
+  await requireMainSuperAdmin(session);
+  const { search, page, pageSize } = parseSearchPage(input);
 
   const where: Prisma.TenantWhereInput = {
     type: TenantType.SUB,
@@ -295,6 +294,7 @@ export async function listSubTenants(
           OR: [
             { name: { contains: search, mode: "insensitive" as const } },
             { slug: { contains: search, mode: "insensitive" as const } },
+            { domains: { some: { hostname: { contains: search, mode: "insensitive" } } } },
           ],
         }
       : {}),
@@ -325,8 +325,8 @@ export async function listSubTenants(
           },
         },
       },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * pageSize,
+      orderBy: [{ createdAt: "desc" }, { uuid: "asc" }],
+      skip: pageOffset(page, pageSize),
       take: pageSize,
     }),
     prisma.tenant.count({ where }),

@@ -1,3 +1,4 @@
+import { usersUpdateProfileResolver } from "./users-update-profile-resolver";
 import { mergeResolvers } from "@/src/graphql/helpers";
 import { usersListMainResolver } from "@/src/graphql/resolvers/users/users-list-main-resolver";
 import { usersGetMainResolver } from "@/src/graphql/resolvers/users/users-get-main-resolver";
@@ -8,6 +9,7 @@ import { usersGeneratePasswordResetLinkResolver } from "@/src/graphql/resolvers/
 import { usersGenerateActivationLinkResolver } from "@/src/graphql/resolvers/users/users-generate-activation-link-resolver";
 
 export const usersResolvers = mergeResolvers(
+  usersUpdateProfileResolver,
   usersListMainResolver,
   usersGetMainResolver,
   usersCreateMainResolver,

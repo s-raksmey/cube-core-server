@@ -1,3 +1,4 @@
+import { getProfile } from "@/src/modules/users/profile.service";
 import { TenantDomainPurpose, TenantStatus, UserStatus } from "@prisma/client";
 import type { AuthAudience } from "@prisma/client";
 import { z } from "zod";
@@ -24,7 +25,6 @@ import {
 import {
   assertConsoleAuthorization,
   findAccountByEmailOrUsername,
-  findAccountByUuid,
   mapAuthUser,
 } from "@/src/modules/users/account";
 
@@ -193,7 +193,5 @@ export async function loginWithPassword(
 }
 
 export async function getMe(userId: string, tenantId?: string) {
-  const account = await findAccountByUuid(userId, tenantId);
-  if (!account) return null;
-  return mapAuthUser(account);
+  return getProfile(userId, tenantId);
 }

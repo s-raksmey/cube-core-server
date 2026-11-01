@@ -1,3 +1,4 @@
+import { searchPageSchema, pageOffset } from "@/src/lib/search";
 import { ArticleStatus, Prisma, TenantType } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -110,15 +111,15 @@ async function validateRelations(tenantUuid: string, permissions: PermissionSet,
 export async function listArticles(session: SessionPayload, input: unknown) {
   const { tenantUuid, permissions } = await access(session);
   requirePermission(permissions, "ARTICLE_VIEW");
-  const filter = parse(z.object({
-    search: z.string().trim().max(160).nullish(), status: z.nativeEnum(ArticleStatus).nullish(),
-    categoryId: z.string().uuid().nullish(), scope: z.enum(["ALL", "MY", "REVIEW"]).default("ALL"),
-    page: z.number().int().min(1).max(100000).default(1), pageSize: z.number().int().min(1).max(100).default(25),
+  const filter = parse(searchPageSchema.extend({
+    status: z.nativeEnum(ArticleStatus).nullish(),
+    categoryId: z.string().uuid().nullish(), scope: z.enum(["ALL", "MY", "REVIEW"]).nullish().transform((value) => value ?? "ALL"),
   }), input);
   if (filter.scope === "REVIEW") requirePermission(permissions, "ARTICLE_REVIEW");
   const where: Prisma.ArticleWhereInput = { tenantUuid,
     ...(filter.scope === "MY" ? { createdByUuid: session.userId } : {}),
-    ...(filter.scope === "REVIEW" ? { status: ArticleStatus.IN_REVIEW } : filter.status ? { status: filter.status } : {}),
+    ...(filter.status ? { status: filter.status } : {}),
+    ...(filter.scope === "REVIEW" ? { AND: [{ status: ArticleStatus.IN_REVIEW }] } : {}),
     ...(filter.categoryId ? { categoryUuid: filter.categoryId } : {}),
     ...(filter.search ? { OR: [
       { title: { contains: filter.search, mode: "insensitive" } },
@@ -128,7 +129,7 @@ export async function listArticles(session: SessionPayload, input: unknown) {
   };
   const [rows, total] = await prisma.$transaction([
     prisma.article.findMany({ where, select: listSelect, orderBy: [{ updatedAt: "desc" }, { uuid: "asc" }],
-      skip: (filter.page - 1) * filter.pageSize, take: filter.pageSize }),
+      skip: pageOffset(filter.page, filter.pageSize), take: filter.pageSize }),
     prisma.article.count({ where }),
   ]);
   const roles = await articleAuthorRoles(tenantUuid, rows.map((row) => row.createdByUuid));

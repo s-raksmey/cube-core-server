@@ -1,18 +1,17 @@
-import { ArticleStatus, Prisma } from "@prisma/client";
+import { findLocalDevelopmentTenant } from "@/src/modules/tenants/local-development-tenant.service";
+import { searchPageSchema, pageOffset } from "@/src/lib/search";
+import { ArticleStatus, Prisma, TenantDomainPurpose } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/src/lib/db";
 import { validationError } from "@/src/lib/errors";
-import { findActiveTenantById } from "@/src/modules/tenants/tenant-domain.service";
+import { findActiveTenantByHostname, findActiveTenantById } from "@/src/modules/tenants/tenant-domain.service";
 
 const slugSchema = z.string().trim().toLowerCase().max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 const relatedLimitSchema = z.number().int().min(1).max(12);
 const POPULAR_WINDOW_DAYS = 7;
-const filterSchema = z.object({
+const filterSchema = searchPageSchema.extend({
   categorySlug: slugSchema.nullish(), subcategorySlug: slugSchema.nullish(), tagSlug: slugSchema.nullish(),
-  search: z.string().trim().max(160).nullish(),
   featured: z.boolean().nullish(), breaking: z.boolean().nullish(),
-  page: z.number().int().min(1).max(100000).default(1),
-  pageSize: z.number().int().min(1).max(30).default(12),
 });
 
 const categorySelect = {
@@ -106,6 +105,15 @@ export async function publicWebsiteTags(tenantId: string) {
   return rows;
 }
 
+/** Bind list/search reads to the website mapping rather than an arbitrary tenant ID. */
+export async function publicWebsiteArticlesForHostname(hostname: string, tenantId: string, input: unknown) {
+  const tenant = hostname === "localhost" && process.env.NODE_ENV !== "production"
+    ? await findLocalDevelopmentTenant()
+    : await findActiveTenantByHostname(hostname, TenantDomainPurpose.WEBSITE);
+  if (!tenant || tenant.uuid !== tenantId) throw validationError("Website tenant does not match hostname");
+  return publicWebsiteArticles(tenant.uuid, input);
+}
+
 export async function publicWebsiteArticles(tenantId: string, input: unknown) {
   const parsed = filterSchema.safeParse(input);
   if (!parsed.success) throw validationError(parsed.error.issues[0]?.message ?? "Invalid article filter");
@@ -121,13 +129,13 @@ export async function publicWebsiteArticles(tenantId: string, input: unknown) {
     ...(breaking === true ? { isBreaking: true, breakingExpiresAt: { gt: new Date() } } : {}),
     ...(search ? { OR: [
       { title: { contains: search, mode: "insensitive" } },
-      { summary: { contains: search, mode: "insensitive" } },
+      { slug: { contains: search, mode: "insensitive" } },
       { translations: { some: { title: { contains: search, mode: "insensitive" } } } },
     ] } : {}),
   };
   const [items, total] = await prisma.$transaction([
     prisma.article.findMany({ where, select: { ...publicArticleSummarySelect, ...(featured === true ? { heroImageUrl: true } : {}) },
-      orderBy: [{ publishedAt: "desc" }, { uuid: "desc" }], skip: (page - 1) * pageSize, take: pageSize }),
+      orderBy: [{ publishedAt: "desc" }, { uuid: "desc" }], skip: pageOffset(page, pageSize), take: pageSize }),
     prisma.article.count({ where }),
   ]);
   return { items: items.map(mapPublicArticleSummary), total, page, pageSize };
